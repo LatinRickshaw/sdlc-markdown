@@ -60,21 +60,23 @@ Generates detailed review with categorized recommendations.
 
 After pushing, verify all checks and tasks pass before proceeding to approval:
 
+> **Important**: Fix **all** failing checks and incomplete tasks — regardless of whether this PR caused them. A pre-existing failing check or unchecked task is still a blocker. The bar is a green, shippable PR, not attribution of who broke what.
+
 1. Fetch all PR checks/status using GitHub MCP (`get_pull_request_checks` or `list_check_runs_for_ref`)
 2. Fetch all PR tasks/to-do items (checklist items in PR description) using GitHub MCP
-3. For each **failed or errored check**:
+3. For each **failed or errored check** (whether introduced by this PR or pre-existing):
    - Identify the root cause by reading the check's log output
    - Fix the underlying issue (e.g. failing tests, lint errors, type errors, build failures)
    - Commit and push the fix
    - Wait for the check to re-run and confirm it passes
-4. For each **incomplete PR task** (unchecked checklist item in the PR body):
+4. For each **incomplete PR task** (unchecked checklist item in the PR body, regardless of origin):
    - Determine whether it can be completed programmatically (e.g. "add tests", "update docs")
    - If so, complete the work, commit, and push
    - If it requires human action, flag it explicitly in the PR summary comment
 5. Repeat until **all checks are green** and **all automatable tasks are checked off**
 6. If a check cannot be fixed after investigation, document the blocker clearly in the PR summary comment and do NOT approve
 
-> **Important**: Do not proceed to Phase 4 (Approval) until all required checks pass and all automatable PR tasks are complete.
+> **Important**: Do not proceed to Phase 4 (Approval) until all required checks pass and all automatable PR tasks are complete — including any that existed before this PR was opened.
 
 ### Phase 4: Approval & Finalization
 
@@ -156,10 +158,10 @@ gh pr view <PR_NUMBER>
 ```
 
 - Fetch all check runs for the PR's head SHA using GitHub MCP
-- For each failing check: read the log, diagnose, fix, push, and wait for re-run
-- For each PR task (checklist item in description): complete automatable ones; flag manual ones
+- For each failing check (whether caused by this PR or pre-existing): read the log, diagnose, fix, push, and wait for re-run
+- For each PR task (checklist item in description, regardless of origin): complete automatable ones; flag manual ones
 - Repeat until `gh pr checks` shows all checks as passing
-- Do NOT advance to Step 5 if any required check is still failing
+- Do NOT advance to Step 5 if any required check is still failing — the cause of the failure is irrelevant
 
 ### Step 5: Finalize PR
 
