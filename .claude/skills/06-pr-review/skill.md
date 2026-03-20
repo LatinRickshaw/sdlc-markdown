@@ -30,7 +30,7 @@ Once complete, it executes the command `say finished reviewing the pull request 
 
 ### Phase 2: Automated Code Review
 
-Analyzes code changes comprehensively for:
+Analyzes all touched files comprehensively — not just lines introduced by this PR. The goal is the **highest possible code quality**, so any issue found in a file is in scope regardless of when it was introduced.
 
 - **Critical Issues**: Missing dependencies, breaking changes, security concerns
 - **Code Quality**: Type safety, error handling, import organization
@@ -38,12 +38,14 @@ Analyzes code changes comprehensively for:
 - **Testing**: Test coverage, edge cases, integration tests
 - **Architecture**: Type definitions, code organization, patterns
 
+> **Important**: Do not limit the review to diff lines. If a pre-existing bug, missing test, or quality gap is found anywhere in a touched file, it must be flagged and fixed. The fact that this PR did not introduce the issue is irrelevant — shipping high-quality code is the standard.
+
 Generates detailed review with categorized recommendations.
 
 ### Phase 3: Implement Recommendations
 
 1. Creates todo list from review recommendations
-2. Implements each recommendation systematically:
+2. Implements each recommendation systematically, including **pre-existing issues** found during review:
    - Type safety improvements
    - Error handling enhancements
    - Documentation updates
@@ -51,6 +53,8 @@ Generates detailed review with categorized recommendations.
    - Code organization refactoring
 3. Organizes changes into logical commits
 4. Pushes commits to PR branch
+
+> **Reminder**: Fixes for pre-existing issues belong in this PR. The bar is overall code quality, not authorship of the defect.
 
 ### Phase 3b: CI Checks & PR Tasks Verification
 
@@ -108,13 +112,14 @@ If PR not found:
 Using GitHub MCP:
 
 - Fetch PR diff and files changed
-- Analyze each file for:
+- For each changed file, analyze the **full file** (not just the diff), including:
   - Missing dependencies
   - Type safety issues
   - Error handling gaps
   - Documentation needs
   - Test coverage
   - Code organization
+- Flag and fix issues regardless of whether this PR introduced them — if it's in a touched file, it's in scope
 - Generate categorized recommendations
 
 ### Step 3: Implement Recommendations
@@ -488,9 +493,9 @@ PR is ready for merge.
 A successful PR review completion includes:
 
 ✅ PR fetched and analyzed successfully
-✅ Comprehensive review conducted
-✅ All critical issues resolved
-✅ Code quality improvements implemented
+✅ Comprehensive review conducted across full file contents (not just diff lines)
+✅ All critical issues resolved — including pre-existing ones in touched files
+✅ Code quality improvements implemented regardless of who introduced them
 ✅ Documentation updated
 ✅ Test coverage adequate
 ✅ All CI checks passing (no failed or errored check runs)
