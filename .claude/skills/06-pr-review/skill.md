@@ -52,6 +52,26 @@ Generates detailed review with categorized recommendations.
 3. Organizes changes into logical commits
 4. Pushes commits to PR branch
 
+### Phase 3b: CI Checks & PR Tasks Verification
+
+After pushing, verify all checks and tasks pass before proceeding to approval:
+
+1. Fetch all PR checks/status using GitHub MCP (`get_pull_request_checks` or `list_check_runs_for_ref`)
+2. Fetch all PR tasks/to-do items (checklist items in PR description) using GitHub MCP
+3. For each **failed or errored check**:
+   - Identify the root cause by reading the check's log output
+   - Fix the underlying issue (e.g. failing tests, lint errors, type errors, build failures)
+   - Commit and push the fix
+   - Wait for the check to re-run and confirm it passes
+4. For each **incomplete PR task** (unchecked checklist item in the PR body):
+   - Determine whether it can be completed programmatically (e.g. "add tests", "update docs")
+   - If so, complete the work, commit, and push
+   - If it requires human action, flag it explicitly in the PR summary comment
+5. Repeat until **all checks are green** and **all automatable tasks are checked off**
+6. If a check cannot be fixed after investigation, document the blocker clearly in the PR summary comment and do NOT approve
+
+> **Important**: Do not proceed to Phase 4 (Approval) until all required checks pass and all automatable PR tasks are complete.
+
 ### Phase 4: Approval & Finalization
 
 1. Adds summary comment to PR with completion status using GitHub MCP
@@ -118,12 +138,29 @@ Example implementation order:
 4. Documentation (README, docstrings)
 5. Testing (unit tests, integration tests)
 
-### Step 4: Finalize PR
+### Step 4: Verify CI Checks & PR Tasks
+
+After pushing recommendation commits:
+
+```bash
+# Check PR status/checks
+gh pr checks <PR_NUMBER>
+
+# View PR details including task checklist
+gh pr view <PR_NUMBER>
+```
+
+- Fetch all check runs for the PR's head SHA using GitHub MCP
+- For each failing check: read the log, diagnose, fix, push, and wait for re-run
+- For each PR task (checklist item in description): complete automatable ones; flag manual ones
+- Repeat until `gh pr checks` shows all checks as passing
+- Do NOT advance to Step 5 if any required check is still failing
+
+### Step 5: Finalize PR
 
 - Push all commits
-- Add summary comment to PR using GitHub MCP
-- Run checks (if configured) using GitHub MCP
-- Approve PR (if all recommendations met) using GitHub MCP
+- Add summary comment to PR using GitHub MCP (include check status and task completion summary)
+- Approve PR (if all checks pass and recommendations met) using GitHub MCP
 - **Report that PR is ready for merge** (does not merge automatically)
 
 ## Review Categories
@@ -456,8 +493,11 @@ A successful PR review completion includes:
 ✅ Code quality improvements implemented
 ✅ Documentation updated
 ✅ Test coverage adequate
+✅ All CI checks passing (no failed or errored check runs)
+✅ All automatable PR tasks/checklist items completed
+✅ Any non-automatable PR tasks flagged in summary comment
 ✅ Clean commit history
-✅ PR summary comment added confirming readiness for merge
+✅ PR summary comment added confirming readiness for merge (including check status)
 ✅ PR approved via formal GitHub approval OR (for solo repos) via clear ✅ summary comment
 ✅ Ready for merge in `/07-complete-task`
 
