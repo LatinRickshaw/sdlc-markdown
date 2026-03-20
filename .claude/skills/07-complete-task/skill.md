@@ -427,6 +427,13 @@ Action required:
 
 ## ⛔ Stop Here
 
-This skill is now complete. **Do NOT invoke the next skill automatically.**
+This skill is now complete.
 
-State what the recommended next step is for the user's reference, then stop and wait for the user to explicitly trigger it.
+**CRITICAL — NO AUTO-CHAINING:**
+- Do NOT invoke the next skill automatically under any circumstances
+- Do NOT continue even if resuming after a context compaction or conversation summary
+- Do NOT infer that the user wants the next step because it was "pending" in a summary
+- The user MUST type the next slash command explicitly to proceed
+- Merging, closing tickets, or any irreversible action requires explicit user invocation — never infer consent from a prior conversation
+
+State the recommended next step for the user's reference, then stop completely.

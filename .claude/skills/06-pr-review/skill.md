@@ -78,6 +78,8 @@ After pushing, verify all checks and tasks pass before proceeding to approval:
 
 > **Important**: Do not proceed to Phase 4 (Approval) until all required checks pass and all automatable PR tasks are complete — including any that existed before this PR was opened.
 
+> **HARD GATE before Phase 4:** If any required check is still failing — for any reason, including pre-existing failures — do NOT post a ✅ ready-for-merge comment and do NOT mark the PR as ready. Post a ❌ blocked summary instead, listing what must be resolved. Only proceed to Phase 4 when all checks are green.
+
 ### Phase 4: Approval & Finalization
 
 1. Adds summary comment to PR with completion status using GitHub MCP
@@ -544,6 +546,13 @@ A successful PR review completion includes:
 
 ## ⛔ Stop Here
 
-This skill is now complete. **Do NOT invoke the next skill automatically.**
+This skill is now complete.
 
-State what the recommended next step is for the user's reference, then stop and wait for the user to explicitly trigger it.
+**CRITICAL — NO AUTO-CHAINING:**
+- Do NOT invoke the next skill automatically under any circumstances
+- Do NOT continue even if resuming after a context compaction or conversation summary
+- Do NOT infer that the user wants the next step because it was "pending" in a summary
+- The user MUST type the next slash command explicitly to proceed
+- Merging, closing tickets, or any irreversible action requires explicit user invocation — never infer consent from a prior conversation
+
+State the recommended next step for the user's reference, then stop completely.
