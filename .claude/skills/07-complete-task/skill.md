@@ -11,53 +11,57 @@ Merges an approved pull request and marks the Jira ticket as "Done". This is the
 ### Examples
 
 ```bash
-# Complete task with current PR
-/07-complete-task
-
-# Complete specific PR
-/07-complete-task 42
-
 # Complete with explicit Jira key
 /07-complete-task 42 SOC-15
 ```
 
 ## What It Does
 
-Once complete, it executes the command `say finished completing the task {SOC-XX}`, ensure to replace {SOC-XX} with the actual Jira key.
+Marges any open PRs relating to this ticket. Transitions the relevant ticket in JIRA. Once complete, it executes the command `say finished completing the task {SOC-XX}`, ensure to replace {SOC-XX} with the actual Jira key.
 
-### 1. PR Verification
+### 1. Repo & PR Discovery
+
+- Identifies the **current working directory** and scans all sub repos for git repositories (same discovery logic as `/02-start-task`)
+- For each repo, uses `list_pull_requests` via GitHub MCP (filtered by `feature/<JIRA-KEY>` head branch) to find open PRs
+- Compiles the full list of PRs to merge across all repos
+
+### 2. PR Verification (per repo)
+
+For each discovered PR:
 
 - Fetches PR details using GitHub MCP
 - Verifies PR is approved by required reviewers, OR confirms a ✅ ready-for-merge review summary comment was posted by `/06-pr-review` (covers solo repos where self-approval is blocked by GitHub)
-- Checks that all status checks pass
+- Fetches all check runs using `get_pull_request_checks` via GitHub MCP — confirms all pass
 - Confirms no merge conflicts exist
 - Validates PR is in mergeable state
 
-### 2. Merge Pull Request
+### 3. Merge Pull Requests (per repo)
 
-- Merges PR using appropriate strategy:
+For each verified PR:
+
+- Merges using the appropriate strategy via GitHub MCP:
   - **Squash merge** (default): Combines all commits into one clean commit
   - **Merge commit**: Preserves all commits (if repo configured)
   - **Rebase**: Rebases and fast-forwards (if repo configured)
-- Uses GitHub MCP to execute merge
-- Confirms merge was successful
+- Confirms merge was successful before proceeding to the next repo
+- If any merge fails: reports which repos succeeded and which failed, and **does not transition Jira to "Done"** until all repos are merged
 
-### 3. Jira Finalization
+### 4. Jira Finalization (once — after all repos merged)
 
 - Fetches current Jira issue details using Atlassian MCP
-- Adds final comment to Jira:
-  - PR merged confirmation
-  - Link to merged PR
-  - Final commit SHA
+- Adds final comment to Jira listing all merged PRs:
+  - PR merged confirmation per repo
+  - Link to each merged PR
+  - Final commit SHA per repo
   - Deployment status (if available)
-- **Transitions Jira ticket to "Done"**
+- **Transitions Jira ticket to "Done"** — only after all repos are successfully merged
 - Records completion timestamp
 
-### 4. Cleanup (Optional)
+### 5. Cleanup (Optional, per repo)
 
-- Optionally deletes remote feature branch (if configured)
-- Optionally deletes local feature branch
-- Switches back to main branch
+- Optionally deletes remote feature branch in each repo
+- Optionally deletes local feature branch in each repo
+- Switches back to trunk branch in each repo
 - Syncs with remote
 
 ## Prerequisites
@@ -71,17 +75,9 @@ Once complete, it executes the command `say finished completing the task {SOC-XX
 
 ## Arguments
 
-| Argument    | Required | Description                          | Example  |
-| ----------- | -------- | ------------------------------------ | -------- |
-| `pr_number` | No       | PR number (auto-detected if omitted) | `42`     |
-| `jira_key`  | No       | Jira key (auto-detected if omitted)  | `SOC-15` |
-
-## Auto-Detection
-
-The skill automatically detects:
-
-- **PR number**: From current branch's open PR
-- **Jira key**: From branch name (e.g., `feature/SOC-15-description`)
+| Argument   | Required | Description                         | Example  |
+| ---------- | -------- | ----------------------------------- | -------- |
+| `jira_key` | Yes      | Jira key (auto-detected if omitted) | `SOC-15` |
 
 ## Merge Strategy
 
@@ -205,33 +201,23 @@ After this skill completes:
 4. ✅ Changes are live (or queued for deployment)
 5. ✅ Task is fully complete
 
-## Integration with Workflow
+## Workflow Integration
 
-### Complete SDLC Workflow:
+Complete workflow:
 
-```bash
-1. /02-start-task SOC-15              # Start work, Jira → "In Progress"
-2. /03-dev-execute SOC-15             # Implement feature
-3. /04-reconcile-work SOC-15          # Optional: Verify alignment
-4. /05-create-pr SOC-15 "Done"        # Commit, push, create PR, Jira → "In Review"
-5. /06-pr-review                      # Automated code review and improvements
-6. /07-complete-task                  # Merge PR, Jira → "Done" ✅
-```
-
-### Workflow States:
+Typical workflow for all tickets:
 
 ```
-Development Phase:
-  02-start-task        → Jira: "In Progress"
-  03-dev-execute       → Code implementation
-  04-reconcile-work    → Quality verification
-
-Code Review Phase:
-  05-create-pr         → Jira: "In Review", PR created
-  06-pr-review         → Code review and improvements
-
-Deployment Phase:
-  07-complete-task     → PR merged, Jira: "Done" ✅
+1. /01-investigate-task SOC-15          # Deep investigation
+2. /02-start-task SOC-15                # Begin work
+3. /03-dev-execute SOC-15               # Implement
+4. /04-reconcile-work                   # Reconciles the work
+5. /05-create-pr SOC-15                 # Create PR
+6. /06-pr-review SOC_15                 # Review and improve code
+7. /05-complete-task SOC-15.            # Finish
+  7.1. Verify PR is approved and checks are passing
+  7.2. Merge PR and transition Jira to "Done"
+  7.3. Clean up branches and sync
 ```
 
 ## Best Practices
@@ -248,9 +234,6 @@ Deployment Phase:
 
 1. ✅ Verify merge was successful
 2. ✅ Check Jira ticket is "Done"
-3. ✅ Monitor deployment pipeline
-4. ✅ Confirm changes are live
-5. ✅ Notify stakeholders if needed
 
 ## Branch Protection
 
@@ -320,21 +303,21 @@ A successful task completion includes:
 
 ### "Cannot find PR"
 
-- Ensure you're on a feature branch
-- Check PR exists using `gh pr list`
-- Specify PR number explicitly
+- Ensure the feature branch follows the `feature/<JIRA-KEY>-description` naming convention
+- Use `list_pull_requests` via GitHub MCP to verify open PRs for the branch
+- Specify PR number explicitly as an argument
 
 ### "Not approved"
 
 - Request reviews from team members
 - Ensure required number of approvals met
-- Check review status with `gh pr view`
+- Check review status using `get_pull_request` via GitHub MCP
 
 ### "Checks failing"
 
-- View failing checks with `gh pr checks`
+- Fetch failing check details using `get_pull_request_checks` via GitHub MCP
 - Fix issues and push changes
-- Wait for checks to complete
+- Wait for checks to complete and re-verify
 
 ### "Merge conflict"
 
@@ -344,38 +327,12 @@ A successful task completion includes:
 
 ## Examples
 
-### Example 1: Standard Completion
+### Example 1: Explicit Jira
 
 ```bash
-# After PR is approved and checks pass
-/07-complete-task
+/07-complete-task SOC-15
 
-Verifying PR #42...
-✅ Approved by 2 reviewers
-✅ All checks passing
-✅ No merge conflicts
-
-Merging PR #42 using squash strategy...
-✅ PR merged successfully (commit: abc123)
-
-Updating Jira SOC-15...
-✅ Transitioned to "Done"
-✅ Final comment added
-
-Cleaning up branches...
-✅ Deleted remote branch feature/SOC-15-api
-✅ Deleted local branch
-✅ Switched to main
-
-Task complete! 🎉
-```
-
-### Example 2: Explicit PR and Jira
-
-```bash
-/07-complete-task 42 SOC-15
-
-Verifying PR #42 for SOC-15...
+Verifying PR for SOC-15...
 ✅ All prerequisites met
 ✅ Merged successfully
 ✅ Jira updated
@@ -383,45 +340,7 @@ Verifying PR #42 for SOC-15...
 Task complete! 🎉
 ```
 
-### Example 3: Checks Failing
-
-```bash
-/07-complete-task
-
-Verifying PR #42...
-❌ Cannot merge: Checks failing
-
-Failed checks:
-- ❌ Test Suite (3 tests failing)
-- ❌ Lint (2 style violations)
-
-Action required:
-1. Fix failing tests in test_api.py
-2. Run linter: npm run lint:fix
-3. Push changes
-4. Wait for checks to pass
-5. Run /07-complete-task again
-```
-
-## Difference from Old Workflow
-
-### Old Workflow (Incorrect):
-
-```
-/05-complete-task → Jira → "Done" ✅
-/06-pr-workflow → Create & merge PR (ticket already closed!)
-```
-
-### New Workflow (Correct):
-
-```
-/05-create-pr → Create PR, Jira → "In Review" 🔍
-/06-pr-review → Review and improve code 🔧
-/07-complete-task → Merge PR, Jira → "Done" ✅
-```
-
 **Key improvement**: Ticket only marked "Done" AFTER the PR is merged, following standard SDLC practices.
-
 
 ---
 
@@ -430,6 +349,7 @@ Action required:
 This skill is now complete.
 
 **CRITICAL — NO AUTO-CHAINING:**
+
 - Do NOT invoke the next skill automatically under any circumstances
 - Do NOT continue even if resuming after a context compaction or conversation summary
 - Do NOT infer that the user wants the next step because it was "pending" in a summary

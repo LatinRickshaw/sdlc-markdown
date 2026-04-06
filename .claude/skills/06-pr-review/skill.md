@@ -7,26 +7,22 @@ This skill conducts comprehensive code review of a pull request, implements reco
 ## Usage
 
 ```bash
-# Review current branch's PR
-/06-pr-review
-
-# Review specific PR
-/06-pr-review 42
-
 # Review PR for specific Jira ticket
 /06-pr-review SOC-5
 ```
 
 ## What This Skill Does
 
-Once complete, it executes the command `say finished reviewing the pull request for the task {SOC-XX}`, ensure to replace {SOC-XX} with the actual Jira key.
+This skill performs a critical review any open PRs for the ticket referenced. Once complete, it executes the command `say finished reviewing the pull request for the task {SOC-XX}`, ensure to replace {SOC-XX} with the actual Jira key.
 
-### Phase 1: Fetch PR Details
+### Phase 1: Discover & Fetch PR Details
 
-1. Identifies PR for current branch (or uses specified PR number) using GitHub MCP
-2. Fetches PR details: title, description, status, checks
-3. Retrieves diff and files changed using GitHub MCP
-4. Gets linked Jira ticket details (if available) using Atlassian MCP
+1. Identifies the **current working directory** as a simple git repo. Or if the current working directory contains multiple sub-dirs as repos, then it checks each one for open PRs.
+2. Builds a list of all sibling repos (same multi-repo logic as `/02-start-task`)
+3. For each repo, searches for an open PR whose head branch matches `feature/<JIRA-KEY>` using the GitHub MCP
+4. Fetches PR details for each found PR: title, description, status, checks using GitHub MCP
+5. Retrieves diff and files changed for each PR using GitHub MCP
+6. Gets linked Jira ticket details (if available) using Atlassian MCP
 
 ### Phase 2: Automated Code Review
 
@@ -62,7 +58,7 @@ After pushing, verify all checks and tasks pass before proceeding to approval:
 
 > **Important**: Fix **all** failing checks and incomplete tasks — regardless of whether this PR caused them. A pre-existing failing check or unchecked task is still a blocker. The bar is a green, shippable PR, not attribution of who broke what.
 
-1. Fetch all PR checks/status using GitHub MCP (`get_pull_request_checks` or `list_check_runs_for_ref`)
+1. Fetch all PR checks/status using GitHub MCP
 2. Fetch all PR tasks/to-do items (checklist items in PR description) using GitHub MCP
 3. For each **failed or errored check** (whether introduced by this PR or pre-existing):
    - Identify the root cause by reading the check's log output
@@ -78,7 +74,7 @@ After pushing, verify all checks and tasks pass before proceeding to approval:
 
 > **Important**: Do not proceed to Phase 4 (Approval) until all required checks pass and all automatable PR tasks are complete — including any that existed before this PR was opened.
 
-> **HARD GATE before Phase 4:** If any required check is still failing — for any reason, including pre-existing failures — do NOT post a ✅ ready-for-merge comment and do NOT mark the PR as ready. Post a ❌ blocked summary instead, listing what must be resolved. Only proceed to Phase 4 when all checks are green.
+> **HARD GATE before Phase 4:** If any required check is still failing — for any reason, including pre-existing failures — do NOT post a ✅ ready-for-merge comment and do NOT mark the PR as ready. Repeat the process until all PR checks are green. Only proceed to Phase 4 when all checks are green.
 
 ### Phase 4: Approval & Finalization
 
@@ -89,24 +85,20 @@ After pushing, verify all checks and tasks pass before proceeding to approval:
 
 ## Parameters
 
-| Parameter   | Required | Description                               | Example |
-| ----------- | -------- | ----------------------------------------- | ------- |
-| `pr_number` | No       | PR number (auto-detected if not provided) | `42`    |
-| `jira_key`  | No       | Jira ticket key to provide context        | `SOC-5` |
+| Parameter  | Required | Description                        | Example |
+| ---------- | -------- | ---------------------------------- | ------- |
+| `jira_key` | Yes      | Jira ticket key to provide context | `SOC-5` |
 
 ## Workflow Steps
 
-### Step 1: Identify PR
+### Step 1: Identify PRs
 
-```bash
-# Check current branch
-git branch --show-current
+1. Run `git branch --show-current` to get the current branch
+2. Discover all sub repos in the current working directory
+3. For each repo, use `list_pull_requests` via GitHub MCP (filtered by the `feature/<JIRA-KEY>` head branch) to find open PRs
+4. Compile the full list of PRs to review across all repos
 
-# Find PR for current branch
-gh pr list --head current-branch
-```
-
-If PR not found:
+If no PRs are found:
 
 - Reports error
 - Suggests running `/05-create-pr` first
@@ -151,19 +143,13 @@ Example implementation order:
 
 After pushing recommendation commits:
 
-```bash
-# Check PR status/checks
-gh pr checks <PR_NUMBER>
-
-# View PR details including task checklist
-gh pr view <PR_NUMBER>
-```
-
-- Fetch all check runs for the PR's head SHA using GitHub MCP
+- Fetch all check runs for the PR's head SHA using `get_pull_request_checks` or `list_check_runs_for_ref` via GitHub MCP
+- Fetch PR details including the task checklist using `get_pull_request` via GitHub MCP
 - For each failing check (whether caused by this PR or pre-existing): read the log, diagnose, fix, push, and wait for re-run
 - For each PR task (checklist item in description, regardless of origin): complete automatable ones; flag manual ones
-- Repeat until `gh pr checks` shows all checks as passing
+- Repeat until all checks are passing (verified via `get_pull_request_checks` via GitHub MCP)
 - Do NOT advance to Step 5 if any required check is still failing — the cause of the failure is irrelevant
+- Repeat the process of fixing issues and verifying checks until a green PR is achieved
 
 ### Step 5: Finalize PR
 
@@ -258,11 +244,11 @@ The skill generates a structured review:
 
 ```bash
 # Start workflow for current branch
-/06-pr-review
+/06-pr-review SOC-15
 
 # Skill fetches PR
-Found PR #2 for current branch
-Reviewing PR #2: [SOC-4] Implement Platform-Specific Templates
+Found PR #2 for SOC-15
+Reviewing PR #2: [SOC-15] Implement Platform-Specific Templates
 
 # Skill conducts review
 Reviewing code changes...
@@ -298,52 +284,34 @@ Found 12 recommendations across 5 categories
 PR is ready for merge. Run /07-complete-task to merge and close ticket.
 ```
 
-## Integration with Other Skills
+## Workflow Integration
 
-### Works With:
+Complete workflow:
 
-- `/02-start-task` - Creates feature branch that PR will be based on
-- `/03-dev-execute` - Implements features that go into the PR
-- `/04-reconcile-work` - Validates work before PR creation
-- `/05-create-pr` - Creates the PR that this skill reviews
-- `/07-complete-task` - Merges the approved PR
+Typical workflow for all tickets:
 
-### Typical Workflow:
-
-```bash
-1. /02-start-task SOC-5              # Start work
-2. /03-dev-execute SOC-5             # Implement feature
-3. /04-reconcile-work SOC-5          # Validate completeness
-4. /05-create-pr SOC-5 "message"     # Commit and create PR
-5. /06-pr-review                     # Review, fix, and approve PR ⬅ THIS SKILL
-6. /07-complete-task                 # Merge PR and close Jira
+```
+1. /01-investigate-task SOC-15          # Deep investigation
+2. /02-start-task SOC-15                # Begin work
+3. /03-dev-execute SOC-15               # Implement
+4. /04-reconcile-work                   # Reconciles the work
+5. /05-create-pr SOC-15                 # Create PR
+6. /06-pr-review SOC_15                 # Review and improve code
+  6.1. Review PR details and files changed
+  6.2. Conduct comprehensive code review (not limited to diff lines)
+  6.3. Implement all recommendations, including fixes for pre-existing issues
+  6.4. Verify all checks pass and all PR tasks are complete
+  6.5. Approve PR when ready
+7. /05-complete-task SOC-15.            # Finish
 ```
 
 ## Prerequisites
 
-- GitHub CLI (`gh`) installed and authenticated
 - GitHub MCP server configured in `.mcp.json`
 - Git repository with remote configured
-- PR must already exist (created by `/05-create-pr`)
-- Proper branch naming convention (feature/JIRA-KEY-description)
-
-## Configuration
-
-Configure in `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..."
-      }
-    }
-  }
-}
-```
+- PRs must already exist (created by `/05-create-pr`)
+- Proper branch naming convention (`feature/JIRA-KEY-description`)
+- **Never push fix commits to a trunk branch** — the skill will abort if the current branch is `main`/`master`/`trunk`
 
 ## Error Handling
 
@@ -376,10 +344,10 @@ The skill handles common errors:
 
 ## What This Skill Does NOT Do
 
-- ❌ Does NOT merge the PR (that's `/07-complete-task`)
-- ❌ Does NOT transition Jira to "Done" (that's `/07-complete-task`)
-- ❌ Does NOT delete branches (that's `/07-complete-task`)
-- ❌ Does NOT create the PR (that's `/05-create-pr`)
+- ❌ Does NOT merge the PR (that's the job of `/07-complete-task`)
+- ❌ Does NOT transition Jira to "Done" (that's the job of `/07-complete-task`)
+- ❌ Does NOT delete branches (that's the job of `/07-complete-task`)
+- ❌ Does NOT create the PR (that's the job of `/05-create-pr`)
 
 ## What Happens Next
 
@@ -404,10 +372,10 @@ After this skill completes:
 
 ```bash
 # After creating PR with /05-create-pr
-/06-pr-review
+/06-pr-review SOC-15
 
-Found PR #2 for current branch
-Reviewing PR #2: [SOC-4] Implement Platform-Specific Templates
+Found PR #2 for JIRA ticket SOC-15
+Reviewing PR #2: [SOC-15] Implement Platform-Specific Templates
 
 Analyzing code...
 Found 9 recommendations
@@ -426,58 +394,18 @@ Implementing recommendations...
 PR is ready for merge. Run /07-complete-task when ready.
 ```
 
-### Example 2: Review Specific PR
-
-```bash
-# Review a specific PR number
-/06-pr-review 45
-
-Reviewing PR #45: [SOC-6] Add Authentication
-
-## Overall Assessment
-Good implementation with minor improvements needed.
-
-### Critical Issues (1)
-❌ Missing JWT_SECRET environment variable validation
-   Files: src/auth/jwt.py
-   Fix: Add validation in startup
-
-Implementing fixes...
-✓ Fixed critical issue
-✓ Added 5 improvements
-✓ PR approved
-
-PR is ready for merge.
-```
-
-### Example 3: Review with Context
-
-```bash
-# Review PR with Jira context
-/06-pr-review SOC-6
-
-Found PR #3 for SOC-6
-Using Jira context for review...
-
-Reviewing against acceptance criteria:
-✓ JWT implementation complete
-✓ Refresh token flow working
-⚠️ Session management basic
-
-Implementing enhancements...
-✓ Improved session management
-✓ Added comprehensive tests
-✓ PR approved
-
-PR is ready for merge.
-```
-
 ## Troubleshooting
+
+### Review Doesn't Find PRs
+
+- Ensure `/05-create-pr` has been run and PRs were created
+- Verify the feature branch naming follows `feature/<JIRA-KEY>-description`
+- Confirm GitHub MCP server is running and authenticated
 
 ### Review Doesn't Find Issues
 
 - Ensure PR has actual code changes
-- Check file diff is accessible
+- Check file diff is accessible via `get_pull_request` (GitHub MCP)
 - Verify GitHub MCP server is running
 
 ### Implementation Fails
@@ -519,28 +447,7 @@ A successful PR review completion includes:
 - Ensures consistent code quality standards
 - Does NOT merge the PR - that's the next step
 
-## Difference from Old `/06-pr-workflow`
-
-### Old Behavior:
-
-```
-/06-pr-workflow → Create PR → Review → Merge → Close Jira ✅
-```
-
-### New Behavior:
-
-```
-/05-create-pr → Create PR, Jira → "In Review" 🔍
-/06-pr-review → Review and approve PR 🔧 (THIS SKILL)
-/07-complete-task → Merge PR, Jira → "Done" ✅
-```
-
-**Key improvement**: Clear separation between PR review and PR merge, following standard code review practices where approval happens before merge.
-
----
-
 **Built to ensure high-quality PRs with comprehensive automated review and improvement**
-
 
 ---
 
@@ -549,6 +456,7 @@ A successful PR review completion includes:
 This skill is now complete.
 
 **CRITICAL — NO AUTO-CHAINING:**
+
 - Do NOT invoke the next skill automatically under any circumstances
 - Do NOT continue even if resuming after a context compaction or conversation summary
 - Do NOT infer that the user wants the next step because it was "pending" in a summary

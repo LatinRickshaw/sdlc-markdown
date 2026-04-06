@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(/.claude/skills/02-start-task/**)",
+      "Edit(/.claude/skills/05-create-pr/**)",
+      "Edit(/.claude/skills/06-pr-review/**)",
+      "Edit(/.claude/skills/07-complete-task/**)"
+    ]
+  }
+}

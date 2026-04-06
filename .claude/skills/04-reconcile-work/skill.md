@@ -13,9 +13,6 @@ Audits completed work against Jira ticket requirements to verify alignment and c
 ```bash
 # Reconcile before creating PR
 /04-reconcile-work SOC-15
-
-# Audit work on current branch
-/04-reconcile-work SOC-22
 ```
 
 ## What It Does
@@ -31,6 +28,8 @@ This skill performs a comprehensive audit of work completed on the current branc
 
 ### 2. Analyze Git History
 
+- Checks the current working directory for git repository.
+- Checks sub directories for additional git repositories (if multi-repo work)
 - Gets all commits on current branch since divergence
 - Analyzes commit messages and changes
 - Identifies files created, modified, deleted
@@ -193,93 +192,21 @@ This ensures the reconciliation is documented in Jira (the source of truth) with
 
 **REQUIRED for:**
 
-- Multi-day development (>3 days of work)
+- All tickets
 - Multiple commits with scope changes
 - Work interrupted and resumed later
-- Sprint demo preparation
 - Complex tickets with many sub-tasks
 - First time implementing this type of feature
 
 **RECOMMENDED for:**
 
+- All tickets
 - Work with any scope additions/changes
 - Unclear initial requirements (clarified during work)
 - Want confidence before creating PR
 - Team leads reviewing subordinate work
 - Large refactoring efforts
 - Cross-cutting changes affecting multiple modules
-
-**SKIP for:**
-
-- Single commit, simple fix
-- Obvious 1:1 mapping to ticket requirements
-- Already confident all requirements met
-- Simple bug fixes or typo corrections
-- Documentation-only changes
-- Configuration changes with no business logic
-
-### Quick Decision Guide
-
-```
-Is it multi-day work? ─── YES ──→ USE /04-reconcile-work
-        │
-        NO
-        │
-        ↓
-Were there scope changes? ─── YES ──→ USE /04-reconcile-work
-        │
-        NO
-        │
-        ↓
-Is it a complex feature? ─── YES ──→ USE /04-reconcile-work
-        │
-        NO
-        │
-        ↓
-More than 3 commits? ─── YES ──→ CONSIDER /04-reconcile-work
-        │
-        NO
-        │
-        ↓
-    SKIP (optional)
-```
-
-### Real-World Examples
-
-**SOC-14** (Migration task):
-
-- Single-commit migration
-- Clear requirements from deprecation notice
-- No scope changes
-- One file modified (generator.py) + test updates
-- **Decision**: ✅ Correctly SKIPPED reconciliation
-- **Rationale**: Simple, focused change with clear requirements
-
-**SOC-45** (Complex feature - hypothetical):
-
-- 5 days of work
-- 12 commits
-- Scope expanded (added CLI features beyond requirements)
-- 8 files created, 15 files modified
-- **Decision**: ⚠️ SHOULD use reconciliation
-- **Rationale**: Multi-day work with scope changes
-
-**SOC-28** (Bug fix - hypothetical):
-
-- 2-line change in error handler
-- Single commit
-- Obvious fix for reported issue
-- **Decision**: ✅ Correctly SKIP reconciliation
-- **Rationale**: Trivial fix with no scope concerns
-
-**SOC-67** (Refactoring - hypothetical):
-
-- 3 days of work
-- 8 commits
-- Extract service classes
-- No new features, just restructuring
-- **Decision**: ⚠️ SHOULD use reconciliation
-- **Rationale**: Multi-day work affecting multiple files, need to verify all functionality preserved
 
 ### Use Before:
 
@@ -330,31 +257,24 @@ This keeps Jira as the source of truth while providing immediate feedback during
 
 ## Integration with Workflow
 
-### Recommended Flow:
+### Workflow Integration
+
+Complete workflow:
+
+Typical workflow for all tickets:
 
 ```
-1. /02-start-task SOC-15
-2. /03-dev-execute SOC-15
-3. /04-reconcile-work SOC-15         # Audit before creating PR
-4. Review reconciliation report
-5. Address any gaps or issues
-6. /05-create-pr SOC-15 "Done"       # Create PR for review
-7. /06-pr-review                     # Review and approve
-8. /07-complete-task                 # Merge and close
-```
-
-### Sprint Retrospective:
-
-```
-# Reconcile all tickets from sprint
-/04-reconcile-work SOC-12
-/04-reconcile-work SOC-13
-/04-reconcile-work SOC-14
-
-# Analyze patterns:
-- Which tickets had scope creep?
-- Which had better estimates?
-- What caused divergence?
+1. /01-investigate-task SOC-15          # Deep investigation
+2. /02-start-task SOC-15                # Begin work
+3. /03-dev-execute SOC-15               # Implement
+4. /04-reconcile-work                   # Reconciles the work
+   4.1. Review reconciliation report
+   4.2. Discuss any scope changes or incomplete work
+   4.3. Decide if ready for PR or needs more work
+   4.4. Document findings in Jira ticket
+5. /05-create-pr SOC-15                 # Create PR
+6. /06-pr-review SOC_15                 # Review and improve code
+7. /05-complete-task SOC-15.            # Finish
 ```
 
 ## Error Handling
@@ -366,16 +286,6 @@ The skill will:
 - Note when ticket has no clear tasks/criteria
 - Continue with partial data if some analysis fails
 - Provide best-effort report even with incomplete data
-
-## Notes
-
-- This is an optional skill - not required for all tasks
-- Most useful for complex or long-running work
-- Helps identify patterns in estimation accuracy
-- Valuable for sprint retrospectives and planning
-- Can be run multiple times during development
-- Report is a snapshot - rerun after additional commits
-- Particularly useful for team leads and project managers
 
 ## Example Scenarios
 
@@ -411,32 +321,6 @@ Acceptance criteria mostly met
 Action: Complete remaining tasks or split ticket
 ```
 
-## Advanced Usage
-
-### Compare Multiple Branches
-
-```bash
-# Switch branches and reconcile each
-git checkout feature-a
-/04-reconcile-work SOC-10
-
-git checkout feature-b
-/04-reconcile-work SOC-11
-
-# Compare alignment scores
-```
-
-### Historical Analysis
-
-```bash
-# Reconcile closed tickets for retrospective
-/04-reconcile-work SOC-5  # Closed last sprint
-/04-reconcile-work SOC-8  # Closed last sprint
-
-# Identify estimation patterns
-```
-
-
 ---
 
 ## ⛔ Stop Here
@@ -444,6 +328,7 @@ git checkout feature-b
 This skill is now complete.
 
 **CRITICAL — NO AUTO-CHAINING:**
+
 - Do NOT invoke the next skill automatically under any circumstances
 - Do NOT continue even if resuming after a context compaction or conversation summary
 - Do NOT infer that the user wants the next step because it was "pending" in a summary

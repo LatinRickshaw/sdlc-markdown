@@ -20,12 +20,13 @@ Performs deep technical investigation before starting implementation. Use this f
 
 ## What It Does
 
-This skill performs comprehensive technical investigation and posts findings to Jira WITHOUT transitioning the ticket. Use this BEFORE running `/02-start-task` for complex work. Once complete, it executes the command `say finished investigating the task {SOC-XX}`, ensure to replace {SOC-XX} with the actual Jira key.
+This skill performs comprehensive technical investigation and posts findings to Jira WITHOUT transitioning the ticket. Use this BEFORE running `/02-start-task` for all tickets. Once complete, it executes the command `say finished investigating the task {SOC-XX}`, ensure to replace {SOC-XX} with the actual Jira key.
 
 ### 1. Fetch Ticket Details
 
 - Retrieves Jira ticket with full description using Atlassian MCP server
 - Reads all acceptance criteria from the Jira ticket
+- Takes into account the existing codebase(s)
 - Understands scope and requirements
 - Identifies deliverables
 
@@ -168,19 +169,12 @@ Investigation complete. Review findings before running `/start-task [JIRA-KEY]`.
 - Tasks affecting multiple systems
 - Tasks with performance or security implications
 - Large features (L/XL size estimates)
-
-### Skip for Simple Tasks
-
-- Bug fixes with known solution
-- Simple UI changes
-- Documentation updates
-- Configuration changes
-- Tasks with clear, simple requirements
+- All tickets
 
 ## Prerequisites
 
 - Jira MCP server configured in `.mcp.json`
-- Git repository initialized
+- Git repository initialized and Github MCP server configured in `.mcp.json`
 - Access to codebase for analysis
 
 ## Arguments
@@ -191,24 +185,18 @@ Investigation complete. Review findings before running `/start-task [JIRA-KEY]`.
 
 ## Workflow Integration
 
-Typical workflow for complex tasks:
+Typical workflow for all tickets:
 
 ```
 1. /01-investigate-task SOC-15          # Deep investigation
-2. Review investigation report
-3. Discuss architectural decisions
-4. /02-start-task SOC-15                # Begin work
-5. /03-dev-execute "Feature" SOC-15     # Implement
-6. /04-reconcile-work                   # Reconciles the work
-7. /05-complete-task SOC-15 "Done"      # Finish
-```
-
-For simple tasks:
-
-```
-1. /02-start-task SOC-16                # Skip investigation
-2. /03-dev-execute "Simple fix" SOC-16
-3. /05-complete-task SOC-16 "Done"
+  1.2. Review investigation report
+  1.3 Discuss architectural decisions
+2. /02-start-task SOC-15                # Begin work
+3. /03-dev-execute SOC-15               # Implement
+4. /04-reconcile-work                   # Reconciles the work
+5. /05-create-pr SOC-15                 # Create PR
+6. /06-pr-review SOC_15                 # Review and improve code
+7. /05-complete-task SOC-15.            # Finish
 ```
 
 ## Benefits
@@ -232,7 +220,7 @@ The skill will:
 
 ## Notes
 
-- This is an optional skill - not required for all tasks
+- This is a mandatory step for all tickets, even small ones, to ensure technical due diligence
 - Investigation findings stay in Jira for reference
 - User decides when to proceed with implementation
 - Can re-run investigation if requirements change
@@ -249,7 +237,6 @@ See the investigation report format above. A real example would include:
 - Detailed pros/cons for each decision
 - Risk assessment with mitigation strategies
 
-
 ---
 
 ## ⛔ Stop Here
@@ -257,6 +244,7 @@ See the investigation report format above. A real example would include:
 This skill is now complete.
 
 **CRITICAL — NO AUTO-CHAINING:**
+
 - Do NOT invoke the next skill automatically under any circumstances
 - Do NOT continue even if resuming after a context compaction or conversation summary
 - Do NOT infer that the user wants the next step because it was "pending" in a summary

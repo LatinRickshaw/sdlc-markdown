@@ -1,6 +1,6 @@
 # Development Execution Skill
 
-Guides the development of software features following engineering best practices including SOLID principles, KISS, DRY, and more. This skill ensures code is built correctly from the start, not fixed after the fact.
+Guides the development of software features following engineering best practices including SOLID principles, KISS, DRY, YAGNI and more. This skill ensures code is built correctly from the start, not fixed after the fact.
 
 ## Usage
 
@@ -11,17 +11,8 @@ Guides the development of software features following engineering best practices
 ### Examples
 
 ```bash
-# Execute a feature development
+# Execute development
 /03-dev-execute SOC-15
-
-# Execute a bug fix
-/03-dev-execute SOC-22
-
-# Execute a refactoring
-/03-dev-execute SOC-18
-
-# Execute with more context
-/03-dev-execute SOC-8
 ```
 
 ## What It Does
@@ -61,7 +52,7 @@ When writing a commit message, it, in no way, provides any atrribution to Anthro
 
 **1.2 Architecture Review**
 
-- Read relevant existing code to understand patterns
+- Read relevant existing code to understand patterns. There may be multiple repos in the current working directory
 - Identify where new code fits in the architecture
 - Determine which existing abstractions to use
 - Plan how to maintain separation of concerns
@@ -84,6 +75,7 @@ When writing a commit message, it, in no way, provides any atrribution to Anthro
 - What unit tests are needed?
 - What integration points need testing?
 - What edge cases must be covered?
+- WHat e2e flows should be tested?
 
 **1.5 Architectural Decision Recording**
 
@@ -207,7 +199,6 @@ Generate a step-by-step implementation plan:
 **2.2 Scope Tracking (Silent)**
 
 - Track any scope changes made during implementation
-- Do NOT block or prompt user during development
 - Store the following for completion report:
   - **Within Ticket Scope**: Tasks completed as specified
   - **Beyond Ticket Scope**: Features/enhancements added and why
@@ -357,40 +348,16 @@ Integration Testing Summary:
 
 When running test suite:
 
-**If pre-existing tests fail (unrelated to your changes):**
-
-1. Verify failures existed before your changes:
-   ```bash
-   git stash
-   pytest tests/
-   git stash pop
-   ```
-2. Document which tests failed:
-   - Test names
-   - Failure reasons (e.g., "missing psycopg2 dependency", "missing API keys")
-   - Evidence they pre-existed
-3. Note in completion report (NOT blocking):
-
-   ```markdown
-   ## Pre-existing Test Failures (Not Introduced)
-
-   - test_database.py::test_connection: Missing psycopg2 dependency
-   - test_integration.py::test_api: Missing API keys in test fixtures
-
-   These failures existed before changes and are not blocking.
-   Recommend creating separate ticket to address test infrastructure.
-   ```
-
-**If new test failures introduced by your changes:**
+**If any test failures are found:**
 
 1. MUST fix before proceeding (blocking)
-2. Cannot create PR with new failures
+2. Cannot create PR with any failures
 3. Debug and resolve all test regressions
 4. Re-run full test suite to confirm fix
 
 **3.5 Integration Check**
 
-- Does new code integrate cleanly with existing code?
+- Does code integrate cleanly?
 - Are existing patterns followed?
 - Is the codebase more maintainable than before?
 
@@ -442,6 +409,9 @@ Post concise Jira comment when tests complete:
 
 **4.3 Final Commit**
 
+- Always use conventional commit message format
+- Include Jira key in commit message
+- Summarize changes and principles applied
 - Prepare commit with clear message
 - Link to Jira ticket if provided
 - Include summary of changes and principles applied
@@ -509,6 +479,7 @@ The skill produces an execution plan and guides implementation:
 - Unit tests: [...]
 - Integration tests: [...]
 - Edge cases: [...]
+- E2E flows: [...]
 
 ## Phase 2: Implementation
 
@@ -569,6 +540,7 @@ Principles applied: [...]
 - Understanding of the task requirements
 - Access to existing codebase
 - Testing framework available
+- Use Atlassian MCP server for Jira integration
 
 ## Arguments
 
@@ -739,22 +711,28 @@ Build software that is:
 
 This skill helps you build it right the first time.
 
-## Integration with Workflow
+## Workflow Integration
 
 Complete workflow:
 
-1. `/02-start-task SOC-15` - Begin work on ticket, Jira → "In Progress"
-2. `/03-dev-execute SOC-15` - Fetch ticket from Jira, build the feature using best practices
-3. Review the implementation against checklist
-4. Run tests
-5. `/04-reconcile-work SOC-15` - Optional: Verify alignment with requirements
-6. `/05-create-pr SOC-15 "Added JWT auth"` - Commit, push, create PR, Jira → "In Review"
-7. `/06-pr-review` - Review and approve PR
-8. `/07-complete-task` - Merge PR, Jira → "Done"
+Typical workflow for all tickets:
 
-This ensures disciplined development from start to finish with proper code review and SDLC practices.
-
-**Note**: The task description and requirements are now fetched directly from the Jira ticket, ensuring single source of truth and eliminating redundant parameters.
+```
+1. /01-investigate-task SOC-15          # Deep investigation
+2. /02-start-task SOC-15                # Begin work
+3. /03-dev-execute SOC-15               # Implement
+  3.1. Analyze requirements and design
+  3.2. Plan implementation steps
+  3.3. Write code following principles
+  3.4. Write tests
+  3.5. Verify implementation and run tests
+  3.6. Document architectural decisions and scope changes
+  3.7. Prepare commit and Jira comment using conventional commit format
+4. /04-reconcile-work                   # Reconciles the work
+5. /05-create-pr SOC-15                 # Create PR
+6. /06-pr-review SOC_15                 # Review and improve code
+7. /05-complete-task SOC-15.            # Finish
+```
 
 ## Notes
 
@@ -776,6 +754,7 @@ Good software is **designed**, not just **written**.
 This skill is now complete.
 
 **CRITICAL — NO AUTO-CHAINING:**
+
 - Do NOT invoke the next skill automatically under any circumstances
 - Do NOT continue even if resuming after a context compaction or conversation summary
 - Do NOT infer that the user wants the next step because it was "pending" in a summary

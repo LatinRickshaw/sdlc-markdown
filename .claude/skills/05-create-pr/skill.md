@@ -12,87 +12,82 @@ Commits your changes and creates a pull request for code review. This skill prep
 
 ```bash
 # Basic usage
-/05-create-pr SOC-5 "Implemented Streamlit review interface"
-
-# With more detail
-/05-create-pr SOC-8 "Added LinkedIn API integration with OAuth2 flow and post scheduling"
+/05-create-pr SOC-5
 ```
 
 ## What It Does
 
-Once complete, it executes the command `say finished creating the pull request for the task {SOC-XX}`, ensure to replace {SOC-XX} with the actual Jira key.
+It creates any PRs required that relate to this ticket using thr GitHub MCP Server. If the current working directory is a simple git repo, then this skill will create a PR for that repo. If the current working directory is a multi-repo setup, it will create PRs for each relevant repo. Once complete, it executes the command `say finished creating the pull request for the task {SOC-XX}`, ensure to replace {SOC-XX} with the actual Jira key.
 
 ## What It Does Not
 
-When creating the PR, it, in no way, provides any atrribution to Anthropic or Claude Code in the commit message, PR description, or Jira comments. This is a personal commit by the user.
+When creating the PR, it, in no way, provides any attribution to Anthropic or Claude Code in the commit message, PR description, or Jira comments. This is a personal commit by the user.
 
-### 1. Git Status Check
+### 1. Repo Discovery
 
-- Runs `git status` to see what files changed
-- Runs `git diff` to review the actual changes
-- **Determines commit state**:
-  - If the working tree is clean AND commits exist ahead of `origin/main` → changes are already committed (common when `/03-dev-execute` has run). **Skip step 3 (Git Commit) and proceed directly to step 4 (Git Push).**
-  - If unstaged or staged changes exist → commit as described in step 3.
+- Identifies the **current working directory** as a simple git repo. Or if the current working directory contains multiple sub-dirs as repos, then it checks each one for uncommitted changes.
+- Builds a list of all sibling repos (same multi-repo logic as `/02-start-task`)
 
-### 2. Jira Update
+### 2. Per-Repo Processing
+
+For **each discovered repo**:
+
+1. **Trunk protection check**: verify `git branch --show-current` is NOT `main`, `master`, or `trunk`. If it is, **abort for that repo immediately** with:
+   ```
+   ERROR: Refusing to commit directly to trunk branch '<branch>' in <repo>.
+   Checkout the feature branch first.
+   ```
+2. Check if the feature branch `feature/<JIRA-KEY>` exists in the repo — if not, skip this repo
+3. Run `git status` and `git diff` to determine commit state:
+   - If the working tree is clean AND commits exist ahead of `origin/main` → already committed. **Skip to push.**
+   - If unstaged or staged changes exist → commit as described below
+4. **Git Commit** (if needed): Generate a commit message with no attribution to Claude:
+
+   ```
+   <type>[optional scope]: <JIRA-KEY> - <description>
+
+   [optional body, e.g.    Detailed changes:
+   - Change 1
+   - Change 2
+   - Change 3]
+
+   [optional footer(s), e.g. Jira: https://[site].atlassian.net/browse/JIRA-KEY]
+   ```
+
+5. **Git Push**: push the feature branch to remote
+6. **Create PR** via GitHub MCP:
+   - Title from Jira ticket
+   - Summary of changes from git log
+   - Test plan section
+   - Link to Jira ticket
+
+If a repo has no feature branch and no changes for this ticket, skip it and note it in the output.
+
+### 3. Jira Update (once, after all repos)
 
 - Fetches the current Jira issue details using the Atlassian MCP Server
-- Adds a comprehensive comment with:
-  - Work summary and file changes
+- Adds **one** comprehensive comment listing all PRs created (one per repo), with:
+  - Work summary and file changes per repo
   - Scope changes (if any) with rationales
   - Follow-up work identified
   - Known limitations
   - Metrics (LOC, test coverage, architectural decisions)
 - **Transitions ticket to "In Review"** (if available) or keeps in "In Progress"
-- Does NOT transition to "Done" - that happens after PR merge
-
-### 3. Git Commit
-
-- Generates a commit message following the format, do not provide any attribution to Claude in the commit message, as this is a personal commit by the user:
-
-  ```
-  [JIRA-KEY] Brief description
-
-  Detailed changes:
-  - Change 1
-  - Change 2
-  - Change 3
-
-  Jira: https://[site].atlassian.net/browse/JIRA-KEY
-  ```
-
-- Commits all staged and unstaged changes
-- Includes the Jira ticket link in the commit
-
-### 4. Git Push
-
-- Pushes the commit to the remote repository
-- Reports the result
-
-### 5. Create Pull Request
-
-- Creates PR using GitHub MCP with:
-  - Title from Jira ticket
-  - Summary of changes from git log
-  - Test plan section
-  - Link to Jira ticket
-- Links PR to Jira as remote issue link
-- Posts PR link to Jira comments
+- Does NOT transition to "Done" — that happens after PR merge
 
 ## Prerequisites
 
-- Jira MCP server configured in [.mcp.json](../.mcp.json)
-- GitHub MCP server configured in [.mcp.json](../.mcp.json)
-- Git repository initialized
-- Git remote configured
-- Working directory must have changes to commit
+- Jira MCP server configured in `.mcp.json`
+- GitHub MCP server configured in `.mcp.json`
+- Git repositories initialized with remotes configured
+- Feature branches must already exist in repos with changes (created by `/02-start-task`)
+- **Never run from a trunk branch** (`main`/`master`/`trunk`) — the skill will abort if this is detected
 
 ## Arguments
 
-| Argument   | Required | Description                             | Example            |
-| ---------- | -------- | --------------------------------------- | ------------------ |
-| `jira_key` | Yes      | The Jira issue key (e.g., SOC-5)        | `SOC-5`            |
-| `summary`  | Yes      | Brief description of the work completed | `"Implemented UI"` |
+| Argument   | Required | Description                      | Example |
+| ---------- | -------- | -------------------------------- | ------- |
+| `jira_key` | Yes      | The Jira issue key (e.g., SOC-5) | `SOC-5` |
 
 ## Jira Status Transition Logic
 
@@ -106,11 +101,14 @@ The skill automatically determines the appropriate Jira transition:
 
 The skill will:
 
-- Stop if there are no changes to commit
+- **Abort** any repo where the current branch is a trunk branch (`main`/`master`/`trunk`)
+- Skip repos with no feature branch for this ticket (with a note in output)
+- Skip repos with no changes on the feature branch (with a note in output)
 - Report if Jira ticket doesn't exist
-- Report if git push fails
-- Report if PR creation fails
-- Provide clear error messages at each step
+- Report if git push fails for any repo
+- Report if PR creation fails for any repo
+- Only post the Jira comment and transition status after processing all repos
+- Provide clear per-repo status at each step
 
 ## Enhanced Jira Comment Format
 
@@ -178,9 +176,12 @@ The skill creates a comprehensive Jira comment with the following sections:
 - file1.py: [Brief description]
 - file2.py: [Brief description]
 
-## 🔗 Pull Request
+## 🔗 Pull Requests
 
-Created PR for code review: [PR Link]
+| Repository  | PR Link          |
+| ----------- | ---------------- |
+| repo-name-1 | [PR #N](PR link) |
+| repo-name-2 | [PR #N](PR link) |
 ```
 
 ## Pull Request Template
@@ -239,44 +240,26 @@ After this skill completes:
 - Architectural decisions are counted and referenced
 - **This skill does NOT close the Jira ticket** - that happens after PR merge in `/07-complete-task`
 
-## Integration with Workflow
+## Workflow Integration
 
-### Complete SDLC Workflow:
+Complete workflow:
 
-```bash
-1. /02-start-task SOC-15              # Start work, Jira → "In Progress"
-2. /03-dev-execute SOC-15             # Implement feature
-3. /04-reconcile-work SOC-15          # Optional: Verify alignment
-4. /05-create-pr SOC-15 "Done"        # Commit, push, create PR, Jira → "In Review"
-5. /06-pr-review                      # Automated code review and improvements
-6. /07-complete-task                  # Merge PR, Jira → "Done"
-```
-
-This ensures proper separation of:
-
-- **Development** (02-03): Writing code
-- **Quality Check** (04): Verifying requirements
-- **Code Review** (05-06): PR creation and review
-- **Deployment** (07): Merging and closing
-
-## Difference from Old `/05-complete-task`
-
-### Old Behavior (Incorrect):
+Typical workflow for all tickets:
 
 ```
-/05-complete-task → Commit → Push → Jira → "Done" ✅
-/06-pr-workflow → Create PR (ticket already closed!) ❌
+1. /01-investigate-task SOC-15          # Deep investigation
+2. /02-start-task SOC-15                # Begin work
+3. /03-dev-execute SOC-15               # Implement
+4. /04-reconcile-work                   # Reconciles the work
+5. /05-create-pr SOC-15                 # Create PR
+   5.1. Review PR description and Jira comment for completeness
+   5.2. Ensure all scope changes are documented with rationales
+   5.3. Verify PR links back to Jira ticket
+   5.4. Check that no Claude attribution is included in commit messages
+   5.5. Confirm PR is created in the correct repo(s) with correct branch structure
+6. /06-pr-review SOC_15                 # Review and improve code
+7. /05-complete-task SOC-15.            # Finish
 ```
-
-### New Behavior (Correct):
-
-```
-/05-create-pr → Commit → Push → Create PR → Jira → "In Review" 🔍
-/06-pr-review → Review and improve code 🔧
-/07-complete-task → Merge PR → Jira → "Done" ✅
-```
-
-This follows standard SDLC where tickets are only marked "Done" **after** the PR is merged, not before.
 
 ---
 
@@ -285,6 +268,7 @@ This follows standard SDLC where tickets are only marked "Done" **after** the PR
 This skill is now complete.
 
 **CRITICAL — NO AUTO-CHAINING:**
+
 - Do NOT invoke the next skill automatically under any circumstances
 - Do NOT continue even if resuming after a context compaction or conversation summary
 - Do NOT infer that the user wants the next step because it was "pending" in a summary

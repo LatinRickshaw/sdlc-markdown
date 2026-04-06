@@ -5,14 +5,12 @@
 Automates the workflow for **preparing to begin** a development task:
 
 1. Checks git status to ensure working directory is clean
-2. Moves to the `main` branch if not already on the `main` branch locally using git
-3. Pulls latest changes from remote (if needed) using git
-4. Creates a feature branch for the task uysing git
-5. Fetches the Jira ticket details using the Atlassian MCP server
-6. Transitions the Jira ticket to "In Progress" using the Atlassian MCP Server
-7. Adds a comment to the Jira ticket indicating work has started using the Atlassian MCP Server
-8. Analyzes ticket complexity and recommends `/01-investigate-task` if needed (non-blocking)
-9. Once complete, it executes the command `say finished starting the task {SOC-XX}`, ensure to replace {SOC-XX} with the actual Jira key.
+2. **Discovers all sub git repositories** in the current working directory
+3. For each discovered repo: moves to trunk, pulls latest, and creates the feature branch where applicable. Not all tasks require changes in all repos, but this ensures the correct branch structure is in place for any repo that does need changes.
+4. Fetches the Jira ticket details using the Atlassian MCP server
+5. Transitions the Jira ticket to "In Progress" using the Atlassian MCP Server
+6. Adds a comment to the Jira ticket indicating work has started, listing all repos in scope, using the Atlassian MCP Server
+7. Once complete, it executes the command `say finished starting the task {SOC-XX}`, ensure to replace {SOC-XX} with the actual Jira key.
 
 **After this skill completes, the user should use `/03-dev-execute` to actually implement the task.**
 
@@ -27,56 +25,63 @@ Automates the workflow for **preparing to begin** a development task:
 ```bash
 # Basic usage
 /02-start-task SOC-5
-
-# Start work on a specific ticket
-/02-start-task SOC-12
 ```
 
 ## What It Does
 
 ### 1. Git Status Check
 
-- Runs `git status` to verify working directory is clean
+- Runs `git status` to verify the current working directory is clean. If the working directory contains multiple sub-dirs as repos, then it checks each one for uncommitted changes.
 - If there are uncommitted changes, warns the user and stops
 - Ensures you're starting from a clean slate
 
-### 2. Moves to `main`
+### 2. Repo Discovery
 
-- Checks if git is already on `main`
-- Checks out the `main` branch if not already on `main`
+- Identifies the **current working directory**
+- Scans all immediate subdirectories of the **current working directory** for those containing a `.git` folder
+- Builds a list of all sibling repos (including the current repo)
+- Reports which repos were discovered
 
-### 3. Sync with Remote (Optional)
+> **Note**: All discovered repos are treated as in scope for this ticket. Feature branches will be created in every one of them.
 
-- Checks if current branch is behind remote
-- If behind, prompts to pull latest changes
-- Helps avoid merge conflicts later
+### 3. Branch Setup (per repo)
 
-### 4. Create Feature Branch
+For **each discovered repo**:
 
-- Creates a feature branch using the naming convention: `feature/<JIRA-KEY>-<description>`
-- Example: `feature/SOC-4-platform-templates-optimization`
-- Checks out the new branch
+1. Check git status — if the repo has uncommitted changes, **warn the user and STOP!!!**
+2. Identify the trunk branch (`main`, `master`, or `trunk` — whichever exists)
+3. Checkout the trunk branch
+4. Pull latest changes from remote
+5. Create and checkout the feature branch: `feature/<JIRA-KEY>-<description>` where applicable.
+6. **Trunk protection assertion**: after checkout, verify `git branch --show-current` returns the feature branch name — if it still shows the trunk branch, abort immediately with:
+   ```
+   ERROR: Failed to switch off trunk branch '<branch>' in <repo>.
+   Feature branch creation may have failed. Do not proceed.
+   ```
 
-### 5. Fetch Jira Ticket using Atlassian MCP Server
+> Example feature branch: `feature/SOC-4-platform-templates-optimization`
+
+### 4. Fetch Jira Ticket using Atlassian MCP Server
 
 - Retrieves the Jira issue details using the Atlassian MCP Server
 - Displays the ticket summary and current status
 - Confirms the ticket exists before proceeding
 
-### 6. Transition to In Progress using the Atlassian MCP Server
+### 5. Transition to In Progress using the Atlassian MCP Server
 
 - Fetches available transitions for the ticket using the Atlassian MCP Server
 - Looks for "In Progress" transition using the Atlassian MCP Server
 - Transitions the ticket from current status (e.g., "To Do") to "In Progress" using the Atlassian MCP Server
 - Handles custom workflow transitions automatically
 
-### 7. Add Jira Comment using the Atlassian MCP Server
+### 6. Add Jira Comment using the Atlassian MCP Server
 
 - Adds a comment to the Jira ticket: "Started work on this task" using the Atlassian MCP Server
+- Lists all repos where feature branches were successfully created
 - Provides traceability of when work began
 - Visible to the team in Jira
 
-### 8. Analyze Complexity & Recommend Investigation (NEW)
+### 7. Analyze Complexity & Recommend Investigation
 
 After transitioning the ticket to "In Progress", analyze ticket content for complexity indicators:
 
@@ -131,18 +136,16 @@ Investigation will:
 You can skip if requirements are already clear.
 ```
 
-**Important**: This is a **suggestion only**, not a requirement. The workflow continues regardless of user's decision.
-
 ## What It Does NOT Do
 
 **CRITICAL: This skill stops after setup and does NOT:**
 
-- Read or analyze the codebase
-- Write any code or implementation
-- Create or modify files (except git operations)
-- Run tests
-- Make commits
-- Execute the task requirements
+- This skill does not Read or analyze the codebase
+- This skill does not Write any code or implementation
+- This skill does not Create or modify files (except git operations)
+- This skill does not Run tests
+- This skill does not Make commits
+- This skill does not Execute the task requirements
 
 **The actual implementation work should be done with `/03-dev-execute` after this skill completes.**
 
@@ -172,59 +175,41 @@ The skill automatically determines the appropriate Jira transition:
 
 The skill will:
 
-- Stop if working directory has uncommitted changes
+- Stop if the current working directory, or any sub-dir repos has uncommitted changes
+- Abort immediately if branch creation leaves any repo on a trunk branch
 - Stop if the Atlassian MCP Server stops working
 - Report if Jira ticket doesn't exist
 - Report if "In Progress" transition is not available
 - Provide clear error messages at each step
-- Suggest running `/05-complete-task` to commit pending work if needed
 
 ## Notes
 
-- Always commit or stash pending work before starting a new task
 - Use `git status` to check your working directory before running
 - The skill ensures you don't accidentally mix work from multiple tickets
-- Pairs well with `/05-complete-task` for a complete workflow
-- Jira comments provide audit trail of when work started
+- **Never commits directly to trunk** — feature branches are always created first
+- Jira comments provide audit trail of when work started and which repos are in scope
 
 ## Workflow Integration
 
-**Typical workflow with clear separation of concerns:**
+Typical workflow for all tickets:
 
-1. **Setup Phase**: `/02-start-task SOC-5`
-   - Creates branch `feature/SOC-5-description`
-   - Transitions Jira ticket to "In Progress"
-   - Adds comment to Jira
-   - Analyzes complexity and recommends investigation if needed
-   - **STOPS HERE** - Does not implement anything
-
-2. **Optional Investigation Phase**: `/01-investigate-task SOC-5` (if recommended)
-   - Only run if complexity indicators detected
-   - User can skip if requirements are clear
-   - Posts investigation findings to Jira
-
-3. **Implementation Phase**: `/03-dev-execute SOC-5`
-   - Fetches requirements from Jira ticket
-   - Uses investigation findings if available
-   - Analyzes codebase
-   - Writes code
-   - Runs tests
-   - Makes implementation commits
-
-4. **Completion Phase**: `/05-complete-task SOC-5 "Implemented feature X"`
-   - Creates final commit
-   - Pushes branch
-   - Creates pull request
-   - Transitions Jira to "Done"
-
-This ensures clean separation between setup, investigation (optional), implementation, and completion phases.
+```
+1. /01-investigate-task SOC-15          # Deep investigation
+2. /02-start-task SOC-15                # Begin work
+   2.1. Transition ticket to "In Progress"
+   2.2. Create feature branches in all repos
+   2.3. Comment on Jira with repos in scope
+3. /03-dev-execute SOC-15               # Implement
+4. /04-reconcile-work                   # Reconciles the work
+5. /05-create-pr SOC-15                 # Create PR
+6. /06-pr-review SOC_15                 # Review and improve code
+7. /05-complete-task SOC-15.            # Finish
+```
 
 ### Example: Simple Task (No Investigation)
 
 ```bash
 /02-start-task SOC-22
-# Output: No complexity indicators detected, proceed directly to implementation
-/03-dev-execute SOC-22
 ```
 
 ### Example: Complex Task (Investigation Recommended)
@@ -234,15 +219,7 @@ This ensures clean separation between setup, investigation (optional), implement
 # Output: ⚠️  COMPLEXITY INDICATORS DETECTED
 #         Keywords found: deprecated, migration
 #         Consider running: /01-investigate-task SOC-14
-
-# User decides to investigate first
-/01-investigate-task SOC-14
-# [Investigation findings posted to Jira]
-
-# Then proceed with implementation
-/03-dev-execute SOC-14
 ```
-
 
 ---
 
@@ -251,6 +228,7 @@ This ensures clean separation between setup, investigation (optional), implement
 This skill is now complete.
 
 **CRITICAL — NO AUTO-CHAINING:**
+
 - Do NOT invoke the next skill automatically under any circumstances
 - Do NOT continue even if resuming after a context compaction or conversation summary
 - Do NOT infer that the user wants the next step because it was "pending" in a summary

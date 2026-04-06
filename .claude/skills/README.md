@@ -499,7 +499,6 @@ Based on SOC-14 experience and user feedback, the following improvements were ma
 - Access to Jira tickets
 
 ### Optional:
-- GitHub CLI (`gh`) for PR creation
 - Testing framework (pytest, etc.)
 - Code coverage tools
 
