@@ -5,14 +5,14 @@ Merges an approved pull request and marks the Jira ticket as "Done". This is the
 ## Usage
 
 ```
-/07-complete-task [PR-NUMBER] [JIRA-KEY]
+/07-complete-task [JIRA-KEY]
 ```
 
 ### Examples
 
 ```bash
 # Complete with explicit Jira key
-/07-complete-task 42 SOC-15
+/07-complete-task SOC-15
 ```
 
 ## What It Does

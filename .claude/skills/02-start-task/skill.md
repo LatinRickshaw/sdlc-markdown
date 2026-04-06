@@ -6,7 +6,7 @@ Automates the workflow for **preparing to begin** a development task:
 
 1. Checks git status to ensure working directory is clean
 2. **Discovers all sub git repositories** in the current working directory
-3. For each discovered repo: moves to trunk, pulls latest, and creates the feature branch where applicable. Not all tasks require changes in all repos, but this ensures the correct branch structure is in place for any repo that does need changes.
+3. Creates the feature branch in the repos that changes will be made in. Does not create branches in repos that are out of scope.
 4. Fetches the Jira ticket details using the Atlassian MCP server
 5. Transitions the Jira ticket to "In Progress" using the Atlassian MCP Server
 6. Adds a comment to the Jira ticket indicating work has started, listing all repos in scope, using the Atlassian MCP Server
@@ -39,10 +39,8 @@ Automates the workflow for **preparing to begin** a development task:
 
 - Identifies the **current working directory**
 - Scans all immediate subdirectories of the **current working directory** for those containing a `.git` folder
-- Builds a list of all sibling repos (including the current repo)
+- Builds a list of all sub repos (including the current repo)
 - Reports which repos were discovered
-
-> **Note**: All discovered repos are treated as in scope for this ticket. Feature branches will be created in every one of them.
 
 ### 3. Branch Setup (per repo)
 
@@ -52,7 +50,7 @@ For **each discovered repo**:
 2. Identify the trunk branch (`main`, `master`, or `trunk` — whichever exists)
 3. Checkout the trunk branch
 4. Pull latest changes from remote
-5. Create and checkout the feature branch: `feature/<JIRA-KEY>-<description>` where applicable.
+5. Only create and checkout the feature branch: `feature/<JIRA-KEY>-<description>` where applicable. If changes are not going to be made in a repo, do NOT create a branch in that repo.
 6. **Trunk protection assertion**: after checkout, verify `git branch --show-current` returns the feature branch name — if it still shows the trunk branch, abort immediately with:
    ```
    ERROR: Failed to switch off trunk branch '<branch>' in <repo>.
