@@ -30,6 +30,7 @@ This skill performs a comprehensive audit of work completed on the current branc
 
 - Checks the current working directory for git repository.
 - Checks sub directories for additional git repositories (if multi-repo work)
+- **Worktree awareness**: Run `git worktree list` to detect if operating inside a linked worktree. If so, use the worktree's branch for divergence analysis. All git history analysis works identically in a worktree — no special handling needed beyond awareness of the context.
 - Gets all commits on current branch since divergence
 - Analyzes commit messages and changes
 - Identifies files created, modified, deleted

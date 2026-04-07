@@ -17,14 +17,17 @@ Automates the workflow for **preparing to begin** a development task:
 ## Usage
 
 ```
-/02-start-task <JIRA-KEY>
+/02-start-task <JIRA-KEY> [--worktree]
 ```
 
 ### Examples
 
 ```bash
-# Basic usage
+# Basic usage (in-place branch checkout)
 /02-start-task SOC-5
+
+# Worktree mode (creates isolated sibling directory)
+/02-start-task SOC-5 --worktree
 ```
 
 ## What It Does
@@ -58,6 +61,46 @@ For **each discovered repo**:
    ```
 
 > Example feature branch: `feature/SOC-4-platform-templates-optimization`
+
+### 3b. Worktree Mode (when `--worktree` flag is provided)
+
+Instead of checking out the feature branch in-place (Step 3), worktree mode creates an isolated sibling directory for the ticket. This allows multiple tickets to be worked on simultaneously in separate Claude Code sessions.
+
+**For single-repo setups:**
+
+1. From the repo root, create a worktree as a sibling directory:
+   ```bash
+   git worktree add ../<repo-name>--<JIRA-KEY> -b feature/<JIRA-KEY>-<description>
+   ```
+   Example: `git worktree add ../my-api--SOC-15 -b feature/SOC-15-platform-templates`
+2. Change working directory to the new worktree path
+3. Verify branch with `git branch --show-current`
+
+**For multi-repo setups:**
+
+1. Create a sibling parent directory: `mkdir ../<parent-name>--<JIRA-KEY>`
+2. For each in-scope sub-repo, create a worktree under that parent:
+   ```bash
+   cd <sub-repo>
+   git worktree add ../../<parent-name>--<JIRA-KEY>/<sub-repo> -b feature/<JIRA-KEY>-<description>
+   ```
+3. Change working directory to the new parent directory
+4. Verify all branches in all sub-repo worktrees
+
+**Worktree detection & reuse:**
+
+- Before creating a new worktree, run `git worktree list` to check if one already exists for this ticket's branch
+- If a worktree already exists for `feature/<JIRA-KEY>`, switch to it instead of creating a new one
+- Report the worktree path to the user so they can open additional Claude Code sessions there
+
+**Important worktree notes:**
+
+- Git prevents checking out the same branch in two worktrees — this is a safety feature that prevents conflicts
+- The worktree shares `.git` history with the main repo, so commits are visible across all worktrees
+- All standard git operations (commit, push, pull, status, diff) work identically inside a worktree
+- The worktree is cleaned up by `/07-complete-task` after the PR is merged
+
+**Trunk protection assertion (worktree mode):** After worktree creation, verify `git branch --show-current` returns the feature branch name in the worktree directory — if it shows the trunk branch, abort immediately.
 
 ### 4. Fetch Jira Ticket using Atlassian MCP Server
 
@@ -156,9 +199,10 @@ You can skip if requirements are already clear.
 
 ## Arguments
 
-| Argument   | Required | Description                            | Example |
-| ---------- | -------- | -------------------------------------- | ------- |
-| `jira_key` | Yes      | The Jira issue key to start working on | `SOC-5` |
+| Argument     | Required | Description                                                                 | Example |
+| ------------ | -------- | --------------------------------------------------------------------------- | ------- |
+| `jira_key`   | Yes      | The Jira issue key to start working on                                      | `SOC-5` |
+| `--worktree` | No       | Creates an isolated sibling directory worktree instead of in-place checkout  | —       |
 
 ## Transition Logic
 
@@ -186,6 +230,7 @@ The skill will:
 - The skill ensures you don't accidentally mix work from multiple tickets
 - **Never commits directly to trunk** — feature branches are always created first
 - Jira comments provide audit trail of when work started and which repos are in scope
+- **Worktree mode** (`--worktree`): Creates an isolated sibling directory, allowing multiple tickets to be worked on in parallel across separate Claude Code sessions. All subsequent skills (03–07) work identically in a worktree. Cleanup happens automatically in `/07-complete-task`.
 
 ## Workflow Integration
 

@@ -26,6 +26,7 @@ When creating the PR, it, in no way, provides any attribution to Anthropic or Cl
 ### 1. Repo Discovery
 
 - Identifies the **current working directory** as a simple git repo. Or if the current working directory contains multiple sub-dirs as repos, then it checks each one for uncommitted changes.
+- **Worktree awareness**: If the current directory is a linked worktree (detected via `git worktree list --porcelain`), identify the main repo path. Pushing, PR creation, and all remote operations work identically from a worktree — no special handling needed.
 - Builds a list of all sibling repos (same multi-repo logic as `/02-start-task`)
 
 ### 2. Per-Repo Processing

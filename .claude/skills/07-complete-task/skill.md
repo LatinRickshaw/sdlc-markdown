@@ -64,6 +64,34 @@ For each verified PR:
 - Switches back to trunk branch in each repo
 - Syncs with remote
 
+### 6. Worktree Cleanup (Automatic when in a worktree)
+
+After successful merge, detect if the current working directory is a git worktree (not the main working tree):
+
+```bash
+# Check if current directory is a linked worktree
+git worktree list --porcelain
+```
+
+**If currently in a worktree:**
+
+1. Record the current worktree path and identify the main repo path from `git worktree list --porcelain`
+2. Change working directory to the main repo
+3. Remove the worktree:
+   ```bash
+   git worktree remove <worktree-path>
+   ```
+4. For multi-repo setups: if the sibling parent directory (e.g. `../project--SOC-15/`) is now empty after removing all sub-repo worktrees, remove that parent directory as well
+5. Run `git worktree prune` to clean up any stale worktree references
+6. Inform the user that the worktree has been cleaned up and they are now back in the main repo
+
+**If NOT in a worktree:** No change to current behavior — skip this step entirely.
+
+**If worktree removal fails** (e.g. uncommitted changes in worktree):
+- Report the error clearly
+- Do NOT force-remove — the user may have uncommitted work
+- Suggest manual cleanup: `git worktree remove --force <path>` if they are sure
+
 ## Prerequisites
 
 - GitHub MCP server configured in [.mcp.json](../.mcp.json)

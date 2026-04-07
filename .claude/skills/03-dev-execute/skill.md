@@ -40,6 +40,7 @@ When writing a commit message, it, in no way, provides any atrribution to Anthro
 - Ensure ticket has sufficient detail for implementation
 - Note any linked investigation reports or architectural decisions
 - Confirm ticket is in "In Progress" status (should be set by `/02-start-task`)
+- **Worktree detection**: Run `git worktree list` to check if the current directory is a linked worktree. If so, note the main repo path for context. No behavioral changes are needed — all git operations work identically inside a worktree.
 
 ### Phase 1: Understanding & Planning (BEFORE any code)
 
