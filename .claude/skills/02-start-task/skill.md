@@ -68,24 +68,22 @@ Instead of checking out the feature branch in-place (Step 3), worktree mode crea
 
 **For single-repo setups:**
 
-1. From the repo root, create a worktree as a sibling directory:
+1. From the repo root, create a worktree in a `.worktrees/` subdirectory:
    ```bash
-   git worktree add ../<repo-name>--<JIRA-KEY> -b feature/<JIRA-KEY>-<description>
+   git worktree add .worktrees/<JIRA-KEY> -b feature/<JIRA-KEY>-<description>
    ```
-   Example: `git worktree add ../my-api--SOC-15 -b feature/SOC-15-platform-templates`
+   Example: `git worktree add .worktrees/SOC-15 -b feature/SOC-15-platform-templates`
 2. Change working directory to the new worktree path
 3. Verify branch with `git branch --show-current`
 
 **For multi-repo setups:**
 
-1. Create a sibling parent directory: `mkdir ../<parent-name>--<JIRA-KEY>`
-2. For each in-scope sub-repo, create a worktree under that parent:
+1. For each in-scope sub-repo, create a worktree inside its own `.worktrees/` subdirectory:
    ```bash
    cd <sub-repo>
-   git worktree add ../../<parent-name>--<JIRA-KEY>/<sub-repo> -b feature/<JIRA-KEY>-<description>
+   git worktree add .worktrees/<JIRA-KEY> -b feature/<JIRA-KEY>-<description>
    ```
-3. Change working directory to the new parent directory
-4. Verify all branches in all sub-repo worktrees
+2. Verify all branches in all sub-repo worktrees
 
 **Worktree detection & reuse:**
 
@@ -96,6 +94,7 @@ Instead of checking out the feature branch in-place (Step 3), worktree mode crea
 **Important worktree notes:**
 
 - Git prevents checking out the same branch in two worktrees — this is a safety feature that prevents conflicts
+- The `.worktrees/` directory must be added to `.gitignore` to prevent tracking worktree contents
 - The worktree shares `.git` history with the main repo, so commits are visible across all worktrees
 - All standard git operations (commit, push, pull, status, diff) work identically inside a worktree
 - The worktree is cleaned up by `/07-complete-task` after the PR is merged
@@ -230,7 +229,7 @@ The skill will:
 - The skill ensures you don't accidentally mix work from multiple tickets
 - **Never commits directly to trunk** — feature branches are always created first
 - Jira comments provide audit trail of when work started and which repos are in scope
-- **Worktree mode** (`--worktree`): Creates an isolated sibling directory, allowing multiple tickets to be worked on in parallel across separate Claude Code sessions. All subsequent skills (03–07) work identically in a worktree. Cleanup happens automatically in `/07-complete-task`.
+- **Worktree mode** (`--worktree`): Creates an isolated `.worktrees/<JIRA-KEY>` subdirectory, allowing multiple tickets to be worked on in parallel across separate Claude Code sessions. All subsequent skills (03–07) work identically in a worktree. Cleanup happens automatically in `/07-complete-task`.
 
 ## Workflow Integration
 
