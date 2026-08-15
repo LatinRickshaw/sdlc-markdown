@@ -79,9 +79,9 @@ git worktree list --porcelain
 2. Change working directory to the main repo
 3. Remove the worktree:
    ```bash
-   git worktree remove <worktree-path>
+   git worktree remove .worktrees/<JIRA-KEY>
    ```
-4. For multi-repo setups: if the sibling parent directory (e.g. `../project--SOC-15/`) is now empty after removing all sub-repo worktrees, remove that parent directory as well
+4. For multi-repo setups: each sub-repo cleans up its own `.worktrees/<JIRA-KEY>`. If the `.worktrees/` directory is empty after removal, delete it as well.
 5. Run `git worktree prune` to clean up any stale worktree references
 6. Inform the user that the worktree has been cleaned up and they are now back in the main repo
 
