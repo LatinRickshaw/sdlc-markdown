@@ -17,7 +17,9 @@ Commits your changes and creates a pull request for code review. This skill prep
 
 ## What It Does
 
-It creates any PRs required that relate to this ticket using thr GitHub MCP Server. If the current working directory is a simple git repo, then this skill will create a PR for that repo. If the current working directory is a multi-repo setup, it will create PRs for each relevant repo. Once complete, it executes the command `say finished creating the pull request for the task {SOC-XX}`, ensure to replace {SOC-XX} with the actual Jira key.
+It creates any PRs required that relate to this ticket using the **GitHub MCP Server exclusively**. If the current working directory is a simple git repo, then this skill will create a PR for that repo. If the current working directory is a multi-repo setup, it will create PRs for each relevant repo. Once complete, it executes the command `say finished creating the pull request for the task {SOC-XX}`, ensure to replace {SOC-XX} with the actual Jira key.
+
+**⛔ Do NOT use the `gh` CLI, `git push` via a `gh` wrapper, or any other GitHub API client for PR creation.** All GitHub operations (creating PRs, reading repo/PR metadata, adding labels/reviewers, etc.) MUST go through the GitHub MCP Server tools. If the GitHub MCP Server is not configured or its tools are unavailable, **stop and report the error to the user** — do not silently fall back to the `gh` CLI or raw REST calls.
 
 ## What It Does Not
 
@@ -55,8 +57,8 @@ For **each discovered repo**:
    [optional footer(s), e.g. Jira: https://[site].atlassian.net/browse/JIRA-KEY]
    ```
 
-5. **Git Push**: push the feature branch to remote
-6. **Create PR** via GitHub MCP:
+5. **Git Push**: push the feature branch to remote (plain `git push`, not `gh`)
+6. **Create PR** via the **GitHub MCP Server only** (e.g. its "create pull request" tool) — never the `gh pr create` CLI or a raw `curl`/REST call:
    - Title from Jira ticket
    - Summary of changes from git log
    - Test plan section
@@ -79,7 +81,7 @@ If a repo has no feature branch and no changes for this ticket, skip it and note
 ## Prerequisites
 
 - Jira MCP server configured in `.mcp.json`
-- GitHub MCP server configured in `.mcp.json`
+- **GitHub MCP server configured in `.mcp.json` — required.** This skill uses the GitHub MCP Server exclusively for all GitHub operations (PR creation, repo/PR metadata). The `gh` CLI is never used, even if installed and authenticated.
 - Git repositories initialized with remotes configured
 - Feature branches must already exist in repos with changes (created by `/02-start-task`)
 - **Never run from a trunk branch** (`main`/`master`/`trunk`) — the skill will abort if this is detected
@@ -103,11 +105,12 @@ The skill automatically determines the appropriate Jira transition:
 The skill will:
 
 - **Abort** any repo where the current branch is a trunk branch (`main`/`master`/`trunk`)
+- **Abort entirely** if the GitHub MCP Server is not configured or its tools fail to load — do not fall back to the `gh` CLI or any other GitHub client
 - Skip repos with no feature branch for this ticket (with a note in output)
 - Skip repos with no changes on the feature branch (with a note in output)
 - Report if Jira ticket doesn't exist
 - Report if git push fails for any repo
-- Report if PR creation fails for any repo
+- Report if PR creation fails for any repo (via the GitHub MCP Server)
 - Only post the Jira comment and transition status after processing all repos
 - Provide clear per-repo status at each step
 
@@ -240,6 +243,7 @@ After this skill completes:
 - The commit message includes a link back to the Jira ticket
 - Architectural decisions are counted and referenced
 - **This skill does NOT close the Jira ticket** - that happens after PR merge in `/07-complete-task`
+- **PR creation always goes through the GitHub MCP Server** - never the `gh` CLI, never a raw GitHub REST/API call
 
 ## Workflow Integration
 
