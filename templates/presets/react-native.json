@@ -1,0 +1,10 @@
+{
+  "description": "React Native / Expo device inspection: read-only adb queries against attached devices.",
+  "allow": [
+    "Bash(adb devices*)",
+    "Bash(adb shell getprop*)",
+    "Bash(adb -s * shell getprop*)",
+    "Bash(adb -s * get-state)",
+    "Bash(adb get-state)"
+  ]
+}

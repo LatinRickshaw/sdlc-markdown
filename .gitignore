@@ -1,1 +1,3 @@
 .worktrees/
+.sdlc/
+__pycache__/

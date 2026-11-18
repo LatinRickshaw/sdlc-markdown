@@ -1,10 +1,52 @@
 {
   "permissions": {
     "allow": [
-      "Edit(/.claude/skills/02-start-task/**)",
-      "Edit(/.claude/skills/05-create-pr/**)",
-      "Edit(/.claude/skills/06-pr-review/**)",
-      "Edit(/.claude/skills/07-complete-task/**)"
+      "Edit(/.claude/**)",
+      "Edit(/tests/**)",
+      "Edit(/templates/**)",
+      "Bash(sed -n *)",
+      "Bash(jq *)",
+      "Bash(say *)",
+      "Bash(date *)",
+      "Bash(git show *)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git blame *)",
+      "Bash(git rev-parse *)",
+      "Bash(git ls-files *)",
+      "Bash(git worktree list *)",
+      "Bash(git remote -v)",
+      "Bash(git stash list)",
+      "Bash(python3 -m unittest *)",
+      "Bash(python3 install.py /Users/christian/Projects/prayerLINK --preset node --dry-run)",
+      "Bash(python3 install.py /Users/christian/Projects/prayerLINK --preset node)",
+      "Bash(python3 install.py /Users/christian/Projects/prayerLINK --preset node --preset react-native)",
+      "Read(//Users/christian/Projects/prayerLINK/.claude/**)"
+    ],
+    "ask": [
+      "Bash(git push --force*)",
+      "Bash(git push -f *)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f *)",
+      "Bash(git reset --hard *)",
+      "Bash(git branch -D *)",
+      "Bash(git clean *)",
+      "Bash(rm -rf *)",
+      "Bash(rm -r *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"${CLAUDE_PROJECT_DIR}/.claude/hooks/approve-readonly-bash.py\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

@@ -1,6 +1,6 @@
 # SDLC Skills Workflow
 
-Comprehensive guide to the 7-skill Software Development Life Cycle (SDLC) workflow for systematic, disciplined software development.
+Comprehensive guide to the 7-skill Software Development Life Cycle (SDLC) workflow for systematic, disciplined software development, plus the `/00-run-sdlc` runner that chains them automatically.
 
 ## Overview
 
@@ -11,10 +11,50 @@ This SDLC workflow provides a structured approach to software development with i
 - **Git-centric**: Feature branches, clean commits, pull requests
 - **Quality-focused**: Testing, review, and reconciliation built-in
 - **Flexible**: Use only the skills you need for each task
+- **Automatable**: `/00-run-sdlc` chains the skills with an on-disk state file, stopping before merge by default
 
 ---
 
 ## The 7 Skills
+
+### 0. `/00-run-sdlc` - Automated Chaining
+
+**Purpose**: Run skills `01` → `07` as one unattended chain for a ticket
+
+**Usage:**
+```bash
+/00-run-sdlc SOC-15                      # 01 → 06, then stop before merge
+/00-run-sdlc SOC-15 --from 02 --until 03 # Any contiguous range
+/00-run-sdlc SOC-15 --until 07           # Full run including merge and Jira "Done"
+/00-run-sdlc SOC-15 --no-worktree        # Work in-place instead of a worktree
+/00-run-sdlc SOC-15 --resume             # Continue a halted pipeline
+/00-run-sdlc SOC-15 --status             # Show pipeline state
+/00-run-sdlc SOC-15 --reset              # Discard state and start over
+```
+
+**Defaults**: `--from 01`, `--until 06`, worktree mode on (`/02-start-task --worktree`). Stage `07` (merge + Done) only runs when you pass `--until 07`.
+
+**How it works:**
+1. Preflight: validates args, fetches the Jira ticket, checks the GitHub MCP is available (if `until ≥ 05`), checks the working tree is clean (if `from ≤ 02`)
+2. Writes a state file `.sdlc/<JIRA-KEY>.json` (gitignored) with `mode: chained`, the `from`/`until` range, and a status per stage
+3. Invokes the first stage. Each stage's closing **"⛔ Stop or Hand Off"** section reads the state file, marks itself `done`, and invokes the next stage, or marks itself `failed` and halts
+4. When the stage equal to `until` finishes, the pipeline says it is finished and prints the next manual step
+
+**Halt gates** (the chain stops and keeps the state file for `--resume`):
+
+| Stage | Halts when |
+| --- | --- |
+| 01 | Ticket not found / Atlassian MCP unavailable |
+| 02 | Dirty tree, trunk-protection failure, no "In Progress" transition |
+| 03 | Ticket not In Progress, unfixable test failures |
+| 04 | Report says **Ready for PR: No** ("With conditions" continues, conditions recorded in `notes`) |
+| 05 | On trunk branch, GitHub MCP unavailable, push/PR failure |
+| 06 | CI cannot be made green, documented blocker, PR already merged |
+| 07 | Any pre-merge check fails, merge fails |
+
+**Safety**: chained mode exists only when the state file says so. A skill invoked by hand with no state file (or a stale one) stops exactly as before. A conversation summary is never treated as evidence that the chain should continue.
+
+---
 
 ### 1. `/01-investigate-task` - Deep Technical Investigation
 
@@ -372,6 +412,31 @@ Multi-day work? ──YES──→ USE
 
 ---
 
+### Example 4: Fully Automated Run
+
+```bash
+# One command: investigate → start → execute → reconcile → PR → review
+/00-run-sdlc SOC-30
+# Output: ... say "finished the SDLC pipeline for SOC-30"
+#         Pipeline finished before merge. When you are ready:
+#           /07-complete-task SOC-30
+
+# Review the PR yourself, then merge and close
+/07-complete-task SOC-30
+```
+
+If a stage halts (for example `/04-reconcile-work` reports "Ready for PR: No"):
+
+```bash
+# ... say "the SDLC pipeline halted at stage 04 for SOC-30"
+# Fix the gap, then:
+/00-run-sdlc SOC-30 --resume
+```
+
+**Total Skills Used**: all 7, with one manual checkpoint before merge
+
+---
+
 ## Skill Selection Decision Trees
 
 ### Should I investigate? (`/01-investigate-task`)
@@ -490,6 +555,121 @@ Based on SOC-14 experience and user feedback, the following improvements were ma
 
 ---
 
+## Install into a project
+
+The skills, the permission hook and the permission rules live in this repo. `install.py` at the repo root wires them into a project. It needs only `python3`.
+
+```bash
+# Preview first: prints every change, writes nothing
+python3 /path/to/sdlc-markdown/install.py /path/to/your/project --preset node --dry-run
+
+# Install
+python3 /path/to/sdlc-markdown/install.py /path/to/your/project --preset node
+```
+
+The script does four things:
+
+1. **Links the skills.** Each `.claude/skills/0*` skill is symlinked into the project's `.claude/skills/`, so edits here reach every project at once.
+2. **Links the hook.** `.claude/hooks` is symlinked into the project. If the project already has its own `.claude/hooks` folder, only `approve-readonly-bash.py` is linked into it.
+3. **Merges the permission rules** from `templates/project-settings.json` into the project's `.claude/settings.json`, plus any `--preset` rules. Commit that file so teammates get the same behaviour.
+4. **Updates `.gitignore`** to include `.sdlc/` and `.worktrees/` in the project and in every immediate sub-folder that is a git repo, which covers multi-repo folders.
+
+How the merge treats an existing `settings.json`:
+
+- Missing `allow`, `ask` and `deny` rules are appended. Existing rules are kept as they are, in their original order.
+- If one of the template's `ask` rules is also in `allow`, it is removed from `allow`. Those are the force-push and delete rules, and they must always prompt.
+- `defaultMode` is set to `acceptEdits` only when the project has no mode yet.
+- The PreToolUse Bash hook is registered once.
+- Every other key is left untouched.
+- The previous file is saved next to it as `settings.json.bak-<timestamp>`. Delete the backup once you are happy with the result.
+
+`settings.local.json` is never touched. Keep personal, machine-specific rules there, and keep branch-specific "don't ask again" entries out of the committed file.
+
+The script is safe to re-run. Run it again after changing the template or a preset to push the new rules out to a project. It only adds rules: a rule you delete from the template must also be deleted from each project by hand.
+
+| Option | Effect |
+| --- | --- |
+| `--preset NAME` | Also add the tooling rules in `templates/presets/NAME.json`. Repeatable. `node` covers yarn, npx, npm and `docker build`; `react-native` covers read-only `adb` device queries. |
+| `--dry-run` | Print what would change and write nothing. |
+| `--force` | Repoint skill or hook symlinks that currently point somewhere else. |
+| `--no-accept-edits` | Leave `defaultMode` unset, so file edits keep prompting. |
+
+The script never replaces a real file or folder. If the project has its own copy of a skill, or a symlink pointing elsewhere without `--force`, it prints a `CONFLICT` line, carries on with the other steps and exits with code 1. An unreadable `settings.json` is reported the same way and is not overwritten.
+
+To add a preset for another stack, create `templates/presets/<name>.json` with an `allow` list, plus `ask` and `deny` lists if needed, using `node.json` as the model.
+
+Notes:
+
+- File edits stop prompting because of `defaultMode: "acceptEdits"`. The pipeline writes a state file and many source files per run. Git, network and MCP calls follow the permission rules either way.
+- The template's MCP rules assume servers named `Atlassian` and `github`, which is how local `.mcp.json` servers are named. A project that uses the claude.ai Atlassian connector instead needs the `mcp__claude_ai_Atlassian_MCP__` prefix in its rules.
+
+### Verify the install
+
+Hooks and settings load only when a session starts, and only from the folder the session starts in. Restart any session that was already open in the project.
+
+**1. Check the hook is registered (terminal).** Start Claude Code from the project root and run `/hooks`:
+
+```bash
+cd /path/to/your/project
+claude
+```
+
+In the `/hooks` menu, pick **PreToolUse**. There should be an entry with matcher **Bash** and this command:
+
+```
+python3 -I "${CLAUDE_PROJECT_DIR}/.claude/hooks/approve-readonly-bash.py"
+```
+
+If the entry is missing, Claude Code did not read the project's `.claude/settings.json`. The usual causes are a session started from a different folder, or a session that was already running when the settings changed. Also check there are no startup warnings about invalid permission rules.
+
+**2. Check the hook approves read-only commands (terminal or VS Code).** The `/hooks` menu may not be available in the VS Code extension, so this check is the one to use there. Open a new session with the project as the workspace and ask Claude to run:
+
+```bash
+cd <sub-repo> && git log -3 --oneline | head -3
+```
+
+This shape always prompted before the hook. It should now run without asking. A force push such as `git push --force` must still prompt.
+
+**3. Check a real run.** Run `/01-investigate-task <KEY>` on a ticket. Read-only work should produce no prompts. If something still prompts, start the session with `SDLC_HOOK_DEBUG=1` set, and the hook prints why it did not approve each command.
+
+---
+
+## Shell & Tool Conventions
+
+Every skill carries the same block near its top. The rules exist because Claude Code only auto-approves commands it can prove are read-only, and prompts for anything else:
+
+| Shape | Why it prompts | Use instead |
+| --- | --- | --- |
+| `cd <repo> && git …` | git after a `cd` into another directory could run that repo's hooks | `git -C <absolute-path> …`, one call per repo |
+| `a; b; c` with one non-read-only part | every segment of a compound command must be allowed | split the call, or keep every segment read-only |
+| `for r in …; do …; done` | control flow is not analysed | one command per repo per call |
+| `python3 -c` / `node -e` | arbitrary code | `jq` |
+| `cat <<EOF > file`, `echo > file` | writes through the shell | `Write` / `Edit` tools |
+| `curl https://…` | network from the shell | `WebFetch` tool |
+| odd quoting, `$(…)`, backticks | unparseable or executes | simple single-line commands |
+
+---
+
+## Permissions
+
+`templates/project-settings.json` has three parts:
+
+- **allow**: read-only commands the built-in set misses (`sed -n`, `jq`, `git show`, `yarn why`, version checks, …), the git workflow the skills perform (`checkout`, `add`, `commit`, `push`, `worktree`, …), the read and comment/transition MCP tools, and the advisory domains for `WebFetch`.
+- **ask**: force pushes, `git reset --hard`, `git branch -D`, `git clean`, `rm -r`. An `ask` rule wins over any `allow` rule and over the hook, so these always prompt.
+- **hooks**: `.claude/hooks/approve-readonly-bash.py`, a `PreToolUse` hook that re-parses each Bash command and answers "allow" only when every segment is a read-only command from its allow-list, every `cd`/`git -C` path stays inside the project, and nothing can write or execute. It never denies; when unsure it prints nothing and the normal permission flow decides. Set `SDLC_HOOK_DEBUG=1` to trace its decisions on stderr. Known limit: in plan mode the hook cannot approve calls Claude Code itself does not consider read-only, so `cd … && git log` may still prompt there.
+
+Project-specific tooling rules live in `templates/presets/`, and `install.py` merges both into a project. The hook's tests are in `tests/test_readonly_hook.py` and the installer's are in `tests/test_install.py`. Both run with the rest of the suite.
+
+---
+
+## Tests
+
+The skills are markdown, so the test suite checks their structure rather than running them. It verifies the hand-off chain (each stage names the right next skill, `06` guards the merge behind `--until 07`, `07` invokes nothing), the standalone no-chaining wording, the runner defaults, and that every `/NN-skill` reference resolves to a real skill directory.
+
+```bash
+python3 -m unittest discover tests
+```
+
 ## Prerequisites
 
 ### Required:
@@ -559,6 +739,15 @@ A: For multi-day work (>3 days), multiple commits with scope changes, or complex
 **Q: What if investigation is recommended but I skip it?**
 A: That's fine. The recommendation is non-blocking. Use your judgment based on requirements clarity.
 
+**Q: Does the chain survive a context compaction?**
+A: Yes. `/00-run-sdlc` records chained mode and the current stage in `.sdlc/<JIRA-KEY>.json`. After a compaction the stage re-reads that file and re-verifies its own outputs. A summary saying a step was "pending" is never used as a reason to continue.
+
+**Q: Will the chain ever merge my PR without asking?**
+A: Only if you pass `--until 07`. The default stops after `/06-pr-review` and tells you to run `/07-complete-task` yourself.
+
+**Q: What if I run a skill by hand while a pipeline state file exists?**
+A: The skill only hands off if the file says that exact stage is `in_progress`. Otherwise it prints a stale-file warning and stops as usual. Use `/00-run-sdlc <KEY> --status`, `--resume`, or `--reset` to manage the file.
+
 **Q: Can I use these skills for non-Jira projects?**
 A: Skills are Jira-first by design. For non-Jira projects, you'd need to adapt or skip certain steps.
 
@@ -568,6 +757,23 @@ A: Removed in favor of Jira-first approach. Task details now fetched directly fr
 ---
 
 ## Change Log
+
+### 2026-11-17 - Fewer Permission Prompts
+- ✅ Added `.claude/hooks/approve-readonly-bash.py`, a PreToolUse hook that auto-approves provably read-only Bash (covers `cd <repo> && git log`, loops, odd quoting) and `tests/test_readonly_hook.py`
+- ✅ Added `templates/project-settings.json` with generic allow/ask rules and the hook registration; documented "Install into a project"
+- ✅ Added `install.py`, which links the skills and hook, merges the permission rules into a project's `settings.json` with a backup, and updates `.gitignore` in every sub-repo. Re-runnable, with `--dry-run`, `--preset`, `--force` and `--no-accept-edits`
+- ✅ Added `templates/presets/node.json` for Node/Yarn tooling rules, and `tests/test_install.py`
+- ✅ Added a "Shell & Tool Conventions" block to every skill (`git -C` not `cd && git`, `jq` not inline scripts, `Write`/`Edit` for files, `WebFetch` for advisories)
+- ✅ Bounded the state-file search at the project root; state file written and updated with `Write`/`Edit`; reconciliation report moves to the scratchpad
+- ✅ Added `__pycache__/` to `.gitignore`
+
+### 2026-11-16 - Automated Chaining
+- ✅ Added `/00-run-sdlc` runner with `--from`, `--until`, `--no-worktree`, `--resume`, `--reset`, `--status` (worktree mode is the default)
+- ✅ Added `tests/test_skill_contracts.py` to guard the chaining invariants (`python3 -m unittest discover tests`)
+- ✅ Replaced each skill's "Stop Here" block with "Stop or Hand Off", driven by `.sdlc/<JIRA-KEY>.json`
+- ✅ Default run stops before merge; `--until 07` opts into merge + Jira "Done"
+- ✅ Added `.sdlc/` to `.gitignore`
+- ✅ Fixed workflow blocks that misnumbered the complete-task step and misspelled the ticket key
 
 ### 2026-01-08 - Major Workflow Improvements
 Based on SOC-14 experience:
@@ -592,7 +798,7 @@ This SDLC workflow provides a **flexible, disciplined approach** to software dev
 - **Review (required)**: Code review and approval
 - **Completion (required)**: Merge and close
 
-**Use what you need, skip what you don't.** The workflow adapts to your task complexity.
+**Use what you need, skip what you don't.** The workflow adapts to your task complexity. When you want the whole thing run for you, `/00-run-sdlc <KEY>` chains it and stops before merge.
 
 **Philosophy**: Build software that is intentional, simple, focused, tested, secure, maintainable, and extensible.
 
