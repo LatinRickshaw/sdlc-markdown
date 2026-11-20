@@ -12,6 +12,7 @@ These rules keep the skill runnable without permission prompts. Claude Code auto
 - **Never `cd <dir> && git …`.** Running git after a `cd` into another directory always prompts. Use `git -C <absolute-repo-path> <subcommand>`, one git operation per Bash call.
 - No `for`/`while` loops over repos. Run one command per repo per Bash call; parallel calls are fine.
 - JSON: `jq` only. Never `python3 -c` or `node -e`; inline scripts are arbitrary code and always prompt.
+- No ad-hoc scripts either: never write a `.js`/`.ts`/`.py`/`.sh` file (scratchpad or elsewhere) and run it with `node`/`python3`/`bash`/`npx`. It is arbitrary code and always prompts. Checks that need code become tests in the repo's own suite, run through its test script (e.g. `yarn --cwd <repo> test <path>`).
 - No redirects to files except `2>/dev/null`. No `$(…)`, backticks, heredocs, `xargs` with flags, or `find -exec`/`-delete`.
 - Files this skill creates (state file, reports) are written with the `Write`/`Edit` tools, never `cat <<EOF >` or `echo >`.
 - Temporary reports go in the session scratchpad directory, never in a repo.
@@ -114,10 +115,9 @@ Look for `.sdlc/<JIRA-KEY>.json` in the **current working directory** (the pipel
 ### 3. Preflight (fail fast, before anything is posted to Jira)
 
 1. **Jira reachable, and which server**: fetch the ticket with `mcp__Atlassian__getJiraIssue` first. If that server is missing or returns 404, retry once with the claude.ai connector (`mcp__claude_ai_Atlassian_MCP__getJiraIssue`, after `getAccessibleAtlassianResources` for the `cloudId`). Record the server that worked as `jira.server_prefix` (`mcp__Atlassian__` or `mcp__claude_ai_Atlassian_MCP__`) and its `jira.cloud_id`. Stop if neither finds the ticket.
-2. **GitHub MCP available** (only if `until ≥ 05`): confirm the GitHub MCP Server tools are loaded. `/05-create-pr` refuses to fall back to the `gh` CLI, so stop now rather than after implementation.
+2. **GitHub MCP available** (only if `until ≥ 05`): confirm the GitHub MCP Server tools are loaded. `/05-create-pr` refuses to fall back to the `gh` CLI, so stop now rather than after implementation. Do not check whether the `gh` CLI is installed; no stage uses it.
 3. **Clean working tree** (only if `from ≤ 02`): discover repos with the `Glob` tool if it is listed, otherwise `ls -d */.git` (`*/.git` plus the current directory, same discovery as `/02-start-task`), then run `git -C <absolute-repo-path> status --short` once per repo, each in its own Bash call (no `cd`, no loops). Stop if any repo has uncommitted changes.
 4. **Environment facts** (record once, so later stages never rediscover them):
-   - `tools.gh`: `true` if `which gh` prints a path, else `false`. Informational only: no stage uses `gh` either way; CI is read through the GitHub MCP.
    - `pr_template`: the path of `.github/pull_request_template.md` (or `PULL_REQUEST_TEMPLATE.md`) if one exists in a discovered repo, else `null`.
    - `jira.review_transition`: leave `null`; `/05-create-pr` fills it with the name of the "In Review" transition if the ticket offers one, or `"none"` if it does not.
    - `repos`: leave `[]`; `/01-investigate-task` fills it (or `/02-start-task` when the run starts at `02` or later).
@@ -135,7 +135,6 @@ Write `.sdlc/<JIRA-KEY>.json` in the current working directory with the `Write` 
   "worktree": true,
   "pipeline_root": "/absolute/path/to/cwd",
   "started_at": "2026-11-16T10:00:00Z",
-  "tools": { "gh": false },
   "jira": { "server_prefix": "mcp__Atlassian__", "cloud_id": "00000000-0000-0000-0000-000000000000", "review_transition": null },
   "pr_template": null,
   "repos": [],

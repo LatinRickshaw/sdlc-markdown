@@ -12,6 +12,7 @@ These rules keep the skill runnable without permission prompts. Claude Code auto
 - **Never `cd <dir> && git …`.** Running git after a `cd` into another directory always prompts. Use `git -C <absolute-repo-path> <subcommand>`, one git operation per Bash call.
 - No `for`/`while` loops over repos. Run one command per repo per Bash call; parallel calls are fine.
 - JSON: `jq` only. Never `python3 -c` or `node -e`; inline scripts are arbitrary code and always prompt.
+- No ad-hoc scripts either: never write a `.js`/`.ts`/`.py`/`.sh` file (scratchpad or elsewhere) and run it with `node`/`python3`/`bash`/`npx`. It is arbitrary code and always prompts. Checks that need code become tests in the repo's own suite, run through its test script (e.g. `yarn --cwd <repo> test <path>`).
 - No redirects to files except `2>/dev/null`. No `$(…)`, backticks, heredocs, `xargs` with flags, or `find -exec`/`-delete`.
 - Files this skill creates (state file, reports) are written with the `Write`/`Edit` tools, never `cat <<EOF >` or `echo >`.
 - Temporary reports go in the session scratchpad directory, never in a repo.

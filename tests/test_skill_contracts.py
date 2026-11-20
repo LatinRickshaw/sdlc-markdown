@@ -187,14 +187,14 @@ class RunnerTests(unittest.TestCase):
         self.assertIsNone(state["halted"])
         self.assertEqual(state["notes"], [])
         # Preflight facts, written once so later stages never rediscover them.
-        self.assertIn("gh", state["tools"])
+        self.assertNotIn("tools", state)
         self.assertEqual(sorted(state["jira"]), ["cloud_id", "review_transition", "server_prefix"])
         self.assertIsNone(state["jira"]["review_transition"])
         self.assertIn("pr_template", state)
         self.assertEqual(state["repos"], [])
 
     def test_preflight_records_facts_and_falls_back_on_jira_404(self):
-        self.assertIn("`which gh`", self.text)
+        self.assertNotIn("which gh", self.text)
         self.assertIn("mcp__Atlassian__getJiraIssue", self.text)
         self.assertIn("mcp__claude_ai_Atlassian_MCP__getJiraIssue", self.text)
         self.assertIn("**read them from this file**", self.text)
@@ -239,6 +239,7 @@ class ConventionsTests(unittest.TestCase):
                 self.assertLess(text.index(self.HEADING), text.index("## Usage"))
                 self.assertIn("Never `cd <dir> && git …`", text)
                 self.assertIn("`jq` only", text)
+                self.assertIn("No ad-hoc scripts", text)
 
     def conventions(self, text):
         start = text.index(self.HEADING)

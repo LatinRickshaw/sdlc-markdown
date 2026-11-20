@@ -645,6 +645,7 @@ Every skill carries the same block near its top. The rules exist because Claude 
 | `a; b; c` with one non-read-only part | every segment of a compound command must be allowed | split the call, or keep every segment read-only |
 | `for r in …; do …; done` | control flow is not analysed | one command per repo per call |
 | `python3 -c` / `node -e` | arbitrary code | `jq` |
+| `node smoke.js`, `python3 check.py` (ad-hoc script file) | arbitrary code | a test in the repo's suite, run via its test script |
 | `cat <<EOF > file`, `echo > file` | writes through the shell | `Write` / `Edit` tools |
 | `curl https://…` | network from the shell | `WebFetch` tool |
 | odd quoting, `$(…)`, backticks | unparseable or executes | simple single-line commands |
