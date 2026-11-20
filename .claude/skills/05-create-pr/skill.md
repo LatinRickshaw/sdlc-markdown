@@ -11,8 +11,9 @@ These rules keep the skill runnable without permission prompts. Claude Code auto
 - No `for`/`while` loops over repos. Run one command per repo per Bash call; parallel calls are fine.
 - JSON: `jq` only. Never `python3 -c` or `node -e`; inline scripts are arbitrary code and always prompt.
 - No ad-hoc scripts either: never write a `.js`/`.ts`/`.py`/`.sh` file (scratchpad or elsewhere) and run it with `node`/`python3`/`bash`/`npx`. It is arbitrary code and always prompts. Checks that need code become tests in the repo's own suite, run through its test script (e.g. `yarn --cwd <repo> test <path>`).
+- The one exception is the shipped pipeline script, `python3 -I .claude/sdlc/sdlc.py <group> <command> …`. It is allow-listed, prints one JSON object and exits 0 (ok), 1 (refused, see `reason`) or 2 (usage). Run it from the project root; if the shell is elsewhere, use `cd <project-root> && python3 -I .claude/sdlc/sdlc.py …`.
 - No redirects to files except `2>/dev/null`. No `$(…)`, backticks, heredocs, `xargs` with flags, or `find -exec`/`-delete`.
-- Files this skill creates (state file, reports) are written with the `Write`/`Edit` tools, never `cat <<EOF >` or `echo >`.
+- Reports and the state file's `repos`, `jira` and `pr_template` fields are written with the `Write`/`Edit` tools, never `cat <<EOF >` or `echo >`. Everything else in the state file is written only by the pipeline script.
 - Temporary reports go in the session scratchpad directory, never in a repo.
 - Security advisories and registry metadata via the `WebFetch` tool, never `curl`.
 - Keep each command single-line with simple quoting; one job per call.
@@ -303,15 +304,27 @@ Typical workflow for all tickets:
 
 ## ⛔ Stop or Hand Off
 
-This skill is now complete. What happens next depends **only** on a pipeline state file on disk, never on conversation history.
+This skill is now complete. What happens next depends **only** on the pipeline state file `.sdlc/<JIRA-KEY>.json` on disk, never on conversation history. The pipeline script owns that file's `stages`, `current_stage`, `halted`, `completed_at` and `notes`: change them only through the commands below, never with the `Edit` tool.
 
 ### 1. Locate the state file
 
-Look for `.sdlc/<JIRA-KEY>.json` in the current working directory, then in each ancestor directory up to the project root (the directory this Claude session started in), **never above it**. This covers worktrees under `.worktrees/` and multi-repo parent directories. Use the `Read` tool (plus `Glob` if it is listed; otherwise `ls .sdlc/` run from each directory inside the project): looking above the project root prompts and can pick up an unrelated pipeline's file. Use the first file found.
+Run this from the project root (the directory this Claude session started in):
 
-### 2. Standalone mode (no state file, or the file fails validation)
+```
+python3 -I .claude/sdlc/sdlc.py state locate <JIRA-KEY> --stage 05
+```
 
-If no file is found, or the file fails any check in step 3, you are in standalone mode. If a file was found but failed validation, first print one line naming the file and the failed check (wrong `jira_key`, `mode` not `chained`, or stage `05` not `in_progress`) so a stale file is noticed. Then:
+It looks for `.sdlc/<JIRA-KEY>.json` in the current working directory, then in each ancestor directory up to the project root, **never above it**, and validates what it finds. It prints `"mode": "chained"` only if all of these hold:
+
+- `mode` is `"chained"`
+- `jira_key` equals the Jira key this skill was invoked with
+- `stages["05"].status` is `"in_progress"`
+
+Otherwise it prints `"mode": "standalone"` and a `reason`.
+
+### 2. Standalone mode
+
+If `mode` is `standalone` and `stale` is `true`, first print the `reason` in one line so a stale file is noticed. Then:
 
 **CRITICAL — NO AUTO-CHAINING:**
 
@@ -323,15 +336,9 @@ If no file is found, or the file fails any check in step 3, you are in standalon
 
 State the recommended next step for the user's reference, then stop completely.
 
-### 3. Chained mode validation
+### 3. Compaction rule
 
-Chained mode applies only if **all** of the following hold in the file:
-
-- `mode` is `"chained"`
-- `jira_key` equals the Jira key this skill was invoked with
-- `stages["05"].status` is `"in_progress"`
-
-**Compaction rule**: chained mode is decided by the file on disk and nothing else. Never continue because a summary says the next step was "pending". After any context compaction, re-read the file before acting. If the file says stage `05` is still `in_progress`, re-verify this stage's own outputs (comments posted, branches created, PRs opened, etc.) before marking it done.
+**Compaction rule**: chained mode is decided by the file on disk and nothing else. Never continue because a summary says the next step was "pending". After any context compaction, run `state locate` again so you re-read the file before acting. If it says stage `05` is still `in_progress`, re-verify this stage's own outputs (comments posted, branches created, PRs opened, etc.) before advancing.
 
 ### 4. Decide the outcome
 
@@ -343,17 +350,23 @@ This stage **halts** the pipeline if any of these occurred:
 
 ### 5. Hand off or halt
 
-Update the state file with the `Edit` tool (never a shell redirect) and take timestamps from `date -u +%Y-%m-%dT%H:%M:%SZ`.
+**On success:** run
 
-**On success:**
+```
+python3 -I .claude/sdlc/sdlc.py state advance <JIRA-KEY> 05
+```
 
-1. Set `stages["05"].status = "done"` and `stages["05"].finished_at` in the state file.
-2. Then:
-   - If `until` equals `"05"`, run the **Finished** announcement from `/00-run-sdlc` ("Pipeline Announcements") and stop.
-   - Otherwise, set `stages["06"].status = "in_progress"`, `stages["06"].started_at`, and `current_stage = "06"`, then invoke the next stage via the Skill tool: skill `06-pr-review`, args `<JIRA-KEY>`.
+It sets `stages["05"].status = "done"` and prints one of:
 
-**On halt:**
+- `"next": {"skill": …, "args": …}`: the script has already set that stage to `in_progress` and made it `current_stage`. Invoke exactly that skill with exactly those args via the Skill tool, and nothing else. For this stage that is skill `06-pr-review`, args `<JIRA-KEY>`.
+- `"finished": true`: `until` was `"05"` and the script has run the **Finished** announcement. Print its `message` and stop.
 
-1. Set `stages["05"].status = "failed"` and `halted = { "stage": "05", "reason": "<one line>", "at": "<timestamp>" }`.
-2. Run the **Halted** announcement from `/00-run-sdlc` ("Pipeline Announcements").
-3. Stop. Do NOT invoke the next stage. The user continues with `/00-run-sdlc <JIRA-KEY> --resume` after fixing the issue.
+**On halt:** run
+
+```
+python3 -I .claude/sdlc/sdlc.py state halt <JIRA-KEY> 05 --reason "<one line>"
+```
+
+It sets `stages["05"].status = "failed"` and `halted`, then runs the **Halted** announcement. Print its `message`, then stop. Do NOT invoke the next stage. The user continues with `/00-run-sdlc <JIRA-KEY> --resume` after fixing the issue.
+
+If either command exits 1, print its `reason` and stop. Never edit the state file to get around it.

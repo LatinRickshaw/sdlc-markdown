@@ -15,6 +15,7 @@ invariants the chaining design depends on rather than running the skills:
 Run with: ``python3 -m unittest discover tests``
 """
 
+import importlib.util
 import json
 import re
 import unittest
@@ -22,6 +23,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 SKILLS = REPO / ".claude" / "skills"
+SCRIPT_PATH = REPO / ".claude" / "sdlc" / "sdlc.py"
 
 STAGES = {
     "01": "01-investigate-task",
@@ -112,7 +114,8 @@ class StandaloneSafetyTests(unittest.TestCase):
 
 
 class HandoffChainTests(unittest.TestCase):
-    INVOKE = re.compile(r"invoke the next stage via the Skill tool: skill `([0-9]{2}-[a-z-]+)`")
+    INVOKE = re.compile(r"For this stage that is skill `([0-9]{2}-[a-z-]+)`")
+    SCRIPT = "python3 -I .claude/sdlc/sdlc.py state"
 
     def test_each_stage_hands_off_to_the_next_skill(self):
         order = list(STAGES.items())
@@ -121,12 +124,30 @@ class HandoffChainTests(unittest.TestCase):
             with self.subTest(stage=num):
                 found = self.INVOKE.findall(section)
                 self.assertEqual(found, [next_name], f"stage {num} must hand off to {next_name}")
-                self.assertIn(f'`stages["{next_num}"].status = "in_progress"`', section)
-                self.assertIn(f'`current_stage = "{next_num}"`', section)
+                self.assertIn("Invoke exactly that skill with exactly those args via the Skill tool", section)
+
+    def test_each_stage_uses_the_state_script_with_its_own_number(self):
+        for num, name in STAGES.items():
+            section = handoff_section(read(name))
+            with self.subTest(stage=num):
+                self.assertIn(f"{self.SCRIPT} locate <JIRA-KEY> --stage {num}", section)
+                self.assertIn(f"{self.SCRIPT} advance <JIRA-KEY> {num}", section)
+                self.assertIn(f'{self.SCRIPT} halt <JIRA-KEY> {num} --reason "<one line>"', section)
+                self.assertIn("never with the `Edit` tool", section)
+                self.assertIn("Never edit the state file to get around it", section)
+                # No stage may still describe hand-editing the stage bookkeeping.
+                self.assertNotIn("in the state file.\n2. Then:", section)
+                self.assertNotIn("take timestamps from `date -u", section)
+
+    def test_script_stage_map_matches_the_skills(self):
+        spec = importlib.util.spec_from_file_location("sdlc_cli", SCRIPT_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertEqual(module.STAGES, STAGES)
 
     def test_stage_01_passes_worktree_flag_through_to_02(self):
         section = handoff_section(read(STAGES["01"]))
-        self.assertIn("append `--worktree` when the state file has `\"worktree\": true`", section)
+        self.assertIn("appends `--worktree` when the state file has `\"worktree\": true`", section)
 
     def test_stage_06_guards_merge_behind_until_07(self):
         section = handoff_section(read(STAGES["06"]))
@@ -286,11 +307,19 @@ class ConventionsTests(unittest.TestCase):
                 self.assertIn("never above it", section)
                 self.assertIn("`Edit` tool", section)
 
-    def test_runner_writes_state_without_shell_redirects(self):
+    def test_runner_writes_state_only_through_the_script(self):
         text = read(RUNNER)
-        self.assertIn("with the `Write` tool", text)
-        self.assertIn("rm .sdlc/<JIRA-KEY>.json", text)
+        for command in ("state init <JIRA-KEY>", "state status <JIRA-KEY>", "state resume <JIRA-KEY>",
+                        "state reset <JIRA-KEY>", "--check"):
+            self.assertIn(command, text)
+        self.assertIn("Never write the file with the `Write` tool or a shell redirect", text)
+        self.assertNotIn("rm .sdlc/", text)
         self.assertIn("git -C <absolute-repo-path> status --short", text)
+
+    def test_every_skill_names_the_script_exception(self):
+        for name in [RUNNER, *STAGES.values()]:
+            with self.subTest(skill=name):
+                self.assertIn("The one exception is the shipped pipeline script", self.conventions(read(name)))
 
 
 class PermissionTemplateTests(unittest.TestCase):
@@ -331,6 +360,14 @@ class PermissionTemplateTests(unittest.TestCase):
         ask = self.load(self.TEMPLATE)["permissions"]["ask"]
         for rule in ("Bash(git push --force*)", "Bash(git reset --hard *)", "Bash(git branch -D *)", "Bash(rm -rf *)"):
             self.assertIn(rule, ask)
+
+    def test_pipeline_script_is_allow_listed_and_hand_deletes_are_retired(self):
+        settings = self.load(self.TEMPLATE)
+        rule = "Bash(python3 -I .claude/sdlc/sdlc.py *)"
+        self.assertIn(rule, settings["permissions"]["allow"])
+        self.assertIn(rule, self.load(REPO / ".claude" / "settings.json")["permissions"]["allow"])
+        self.assertIn("Bash(rm .sdlc/*)", settings["retired"])
+        self.assertTrue(SCRIPT_PATH.is_file())
 
     def test_retired_rules_are_not_shipped(self):
         settings = self.load(self.TEMPLATE)

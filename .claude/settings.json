@@ -18,6 +18,7 @@
       "Bash(git remote -v)",
       "Bash(git stash list)",
       "Bash(python3 -m unittest *)",
+      "Bash(python3 -I .claude/sdlc/sdlc.py *)",
       "Bash(python3 install.py /Users/christian/Projects/prayerLINK --preset node --dry-run)",
       "Bash(python3 install.py /Users/christian/Projects/prayerLINK --preset node)",
       "Bash(python3 install.py /Users/christian/Projects/prayerLINK --preset node --preset react-native)",

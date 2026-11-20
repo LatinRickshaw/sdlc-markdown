@@ -36,8 +36,8 @@ This SDLC workflow provides a structured approach to software development with i
 
 **How it works:**
 1. Preflight: validates args, fetches the Jira ticket, checks the GitHub MCP is available (if `until ≥ 05`), checks the working tree is clean (if `from ≤ 02`)
-2. Writes a state file `.sdlc/<JIRA-KEY>.json` (gitignored) with `mode: chained`, the `from`/`until` range, and a status per stage
-3. Invokes the first stage. Each stage's closing **"⛔ Stop or Hand Off"** section reads the state file, marks itself `done`, and invokes the next stage, or marks itself `failed` and halts
+2. Runs `sdlc.py state init`, which writes a state file `.sdlc/<JIRA-KEY>.json` (gitignored) with `mode: chained`, the `from`/`until` range, and a status per stage
+3. Invokes the first stage. Each stage's closing **"⛔ Stop or Hand Off"** section runs `sdlc.py state advance`, which marks the stage `done` and names the next skill to invoke, or `sdlc.py state halt`, which marks it `failed` and stops the chain
 4. When the stage equal to `until` finishes, the pipeline says it is finished and prints the next manual step
 
 **Halt gates** (the chain stops and keeps the state file for `--resume`):
@@ -567,12 +567,13 @@ python3 /path/to/sdlc-markdown/install.py /path/to/your/project --preset node --
 python3 /path/to/sdlc-markdown/install.py /path/to/your/project --preset node
 ```
 
-The script does four things:
+The script does five things:
 
 1. **Links the skills.** Each `.claude/skills/0*` skill is symlinked into the project's `.claude/skills/`, so edits here reach every project at once.
 2. **Links the hook.** `.claude/hooks` is symlinked into the project. If the project already has its own `.claude/hooks` folder, only `approve-readonly-bash.py` is linked into it.
-3. **Merges the permission rules** from `templates/project-settings.json` into the project's `.claude/settings.json`, plus any `--preset` rules. Commit that file so teammates get the same behaviour.
-4. **Updates `.gitignore`** to include `.sdlc/` and `.worktrees/` in the project and in every immediate sub-folder that is a git repo, which covers multi-repo folders.
+3. **Links the pipeline script.** `.claude/sdlc` (holding `sdlc.py`) is symlinked into the project. See "Pipeline script" below.
+4. **Merges the permission rules** from `templates/project-settings.json` into the project's `.claude/settings.json`, plus any `--preset` rules. Commit that file so teammates get the same behaviour.
+5. **Updates `.gitignore`** to include `.sdlc/` and `.worktrees/` in the project and in every immediate sub-folder that is a git repo, which covers multi-repo folders.
 
 How the merge treats an existing `settings.json`:
 
@@ -650,13 +651,32 @@ Every skill carries the same block near its top. The rules exist because Claude 
 | `curl https://…` | network from the shell | `WebFetch` tool |
 | odd quoting, `$(…)`, backticks | unparseable or executes | simple single-line commands |
 
+The one exception to "no scripts" is the shipped, tested pipeline script below. It is allow-listed by exact shape.
+
+---
+
+## Pipeline script
+
+`.claude/sdlc/sdlc.py` (stdlib Python, run as `python3 -I .claude/sdlc/sdlc.py …` from the project root) holds the parts of the pipeline that have exactly one correct answer. The agent runs one command and branches on its JSON output instead of working the logic out from prose. Exit codes: `0` ok, `1` refused (see `reason`), `2` usage error.
+
+| Command | Replaces |
+| --- | --- |
+| `state init <KEY> [--from NN] [--until NN] [--no-worktree] [--check] --jira-server … --cloud-id … [--pr-template …]` | Argument validation, the existing-file refusal, the `--until 07` warning, writing the state file |
+| `state status \| resume \| reset <KEY>` | `/00-run-sdlc --status / --resume / --reset` |
+| `state locate <KEY> --stage NN` | The ancestor search for the state file (bounded by `$CLAUDE_PROJECT_DIR`) and the chained-mode check |
+| `state advance <KEY> NN` | Marking a stage done, starting the next one (`06` hands to `07` only with `--until 07`), the **Finished** announcement |
+| `state halt <KEY> NN --reason "…" [--advisory-diff file]` | Marking a stage failed and the **Halted** announcement |
+| `state note <KEY> "…"` | Appending to `notes` |
+
+The script owns `stages`, `current_stage`, `halted`, `completed_at` and `notes`. Skills edit only `repos`, `jira` and `pr_template`, with the `Edit` tool. Set `SDLC_NO_SAY=1` to silence the spoken announcements. Tests: `tests/test_sdlc_cli.py`.
+
 ---
 
 ## Permissions
 
 `templates/project-settings.json` has three parts:
 
-- **allow**: read-only commands the built-in set misses (`sed -n`, `jq`, `git show`, `yarn why`, version checks, …), the git workflow the skills perform (`checkout`, `add`, `commit`, `push`, `worktree`, …), the read and comment/transition MCP tools, and the advisory domains for `WebFetch`.
+- **allow**: read-only commands the built-in set misses (`sed -n`, `jq`, `git show`, `yarn why`, version checks, …), the pipeline script (`python3 -I .claude/sdlc/sdlc.py *`), the git workflow the skills perform (`checkout`, `add`, `commit`, `push`, `worktree`, …), the read and comment/transition MCP tools, and the advisory domains for `WebFetch`.
 - **ask**: force pushes, `git reset --hard`, `git branch -D`, `git clean`, `rm -r`. An `ask` rule wins over any `allow` rule and over the hook, so these always prompt.
 - **hooks**: `.claude/hooks/approve-readonly-bash.py`, a `PreToolUse` hook that re-parses each Bash command and answers "allow" only when every segment is a read-only command from its allow-list, every `cd`/`git -C` path stays inside the project, and nothing can write or execute. It never denies; when unsure it prints nothing and the normal permission flow decides. Set `SDLC_HOOK_DEBUG=1` to trace its decisions on stderr. Known limit: in plan mode the hook cannot approve calls Claude Code itself does not consider read-only, so `cd … && git log` may still prompt there.
 
@@ -759,6 +779,12 @@ A: Removed in favor of Jira-first approach. Task details now fetched directly fr
 ---
 
 ## Change Log
+
+### 2026-11-20 - Pipeline Script (state machine)
+- ✅ Added `.claude/sdlc/sdlc.py` with `state init/status/resume/reset/locate/advance/halt/note`. The agent no longer hand-edits stage bookkeeping, works out the next skill, or writes timestamps
+- ✅ Every stage's "Stop or Hand Off" section and the `/00-run-sdlc` steps now call the script; the standalone NO AUTO-CHAINING rules are unchanged
+- ✅ `install.py` links `.claude/sdlc`; the template allow-lists the script and retires `rm .sdlc/*`
+- ✅ Added `tests/test_sdlc_cli.py`
 
 ### 2026-11-17 - Fewer Permission Prompts
 - ✅ Added `.claude/hooks/approve-readonly-bash.py`, a PreToolUse hook that auto-approves provably read-only Bash (covers `cd <repo> && git log`, loops, odd quoting) and `tests/test_readonly_hook.py`

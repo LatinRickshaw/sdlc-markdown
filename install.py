@@ -10,7 +10,8 @@ template to push new rules out):
 1. Symlinks each ``.claude/skills/0*`` skill into ``<target>/.claude/skills/``.
 2. Symlinks ``.claude/hooks`` into ``<target>/.claude/hooks``.  If the target
    already has a real hooks directory, only the hook script is linked into it.
-3. Merges ``templates/project-settings.json`` (plus any ``--preset`` files from
+3. Symlinks ``.claude/sdlc`` (the pipeline script) into ``<target>/.claude/sdlc``.
+4. Merges ``templates/project-settings.json`` (plus any ``--preset`` files from
    ``templates/presets/``) into ``<target>/.claude/settings.json``:
    - allow / ask / deny rules are added if missing; existing rules are kept
      and never reordered; only rules listed under ``retired`` in the
@@ -19,7 +20,7 @@ template to push new rules out):
      ``--no-accept-edits``)
    - the PreToolUse Bash hook is added once
    - the previous file is backed up as ``settings.json.bak-<timestamp>``
-4. Adds ``.sdlc/`` and ``.worktrees/`` to ``.gitignore`` in the target (if it is
+5. Adds ``.sdlc/`` and ``.worktrees/`` to ``.gitignore`` in the target (if it is
    a git repo) and in every immediate sub-directory that is a git repo.
 
 ``settings.local.json`` is never touched: it holds personal rules.
@@ -43,6 +44,7 @@ REPO = Path(__file__).resolve().parent
 SKILLS_SRC = REPO / ".claude" / "skills"
 HOOKS_SRC = REPO / ".claude" / "hooks"
 HOOK_SCRIPT = "approve-readonly-bash.py"
+SCRIPTS_SRC = REPO / ".claude" / "sdlc"
 TEMPLATE = REPO / "templates" / "project-settings.json"
 PRESETS_DIR = REPO / "templates" / "presets"
 GITIGNORE_ENTRIES = (".sdlc/", ".worktrees/")
@@ -105,6 +107,10 @@ class Installer:
             self.link(HOOKS_SRC / HOOK_SCRIPT, dest / HOOK_SCRIPT)
         else:
             self.link(HOOKS_SRC, dest)
+
+    def install_scripts(self) -> None:
+        print("Pipeline script")
+        self.link(SCRIPTS_SRC, self.target / ".claude" / "sdlc")
 
     # -- settings -----------------------------------------------------------
 
@@ -271,6 +277,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     installer = Installer(target, dry_run=args.dry_run, force=args.force)
     installer.install_skills()
     installer.install_hook()
+    installer.install_scripts()
     installer.install_settings(args.preset, accept_edits=not args.no_accept_edits)
     installer.install_gitignores()
 

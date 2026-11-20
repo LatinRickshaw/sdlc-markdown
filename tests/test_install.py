@@ -68,6 +68,9 @@ class InstallTests(unittest.TestCase):
         hooks = self.target / ".claude" / "hooks"
         self.assertTrue(hooks.is_symlink())
         self.assertTrue((hooks / "approve-readonly-bash.py").is_file())
+        scripts = self.target / ".claude" / "sdlc"
+        self.assertTrue(scripts.is_symlink())
+        self.assertTrue((scripts / "sdlc.py").is_file())
 
     def test_fresh_install_writes_template_settings(self):
         self.run_install()

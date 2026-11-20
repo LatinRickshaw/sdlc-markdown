@@ -13,8 +13,9 @@ These rules keep the skill runnable without permission prompts. Claude Code auto
 - No `for`/`while` loops over repos. Run one command per repo per Bash call; parallel calls are fine.
 - JSON: `jq` only. Never `python3 -c` or `node -e`; inline scripts are arbitrary code and always prompt.
 - No ad-hoc scripts either: never write a `.js`/`.ts`/`.py`/`.sh` file (scratchpad or elsewhere) and run it with `node`/`python3`/`bash`/`npx`. It is arbitrary code and always prompts. Checks that need code become tests in the repo's own suite, run through its test script (e.g. `yarn --cwd <repo> test <path>`).
+- The one exception is the shipped pipeline script, `python3 -I .claude/sdlc/sdlc.py <group> <command> …`. It is allow-listed, prints one JSON object and exits 0 (ok), 1 (refused, see `reason`) or 2 (usage). Run it from the project root; if the shell is elsewhere, use `cd <project-root> && python3 -I .claude/sdlc/sdlc.py …`.
 - No redirects to files except `2>/dev/null`. No `$(…)`, backticks, heredocs, `xargs` with flags, or `find -exec`/`-delete`.
-- Files this skill creates (state file, reports) are written with the `Write`/`Edit` tools, never `cat <<EOF >` or `echo >`.
+- Reports and the state file's `repos`, `jira` and `pr_template` fields are written with the `Write`/`Edit` tools, never `cat <<EOF >` or `echo >`. Everything else in the state file is written only by the pipeline script.
 - Temporary reports go in the session scratchpad directory, never in a repo.
 - Security advisories and registry metadata via the `WebFetch` tool, never `curl`.
 - Keep each command single-line with simple quoting; one job per call.
@@ -89,42 +90,52 @@ Stage numbers map to skills:
 
 ## What It Does
 
-### 1. Parse & Validate Arguments
+All state-file bookkeeping is done by the shipped script `python3 -I .claude/sdlc/sdlc.py state …`, run from the pipeline root (the current working directory). It validates arguments, writes the file, and prints one JSON object. Exit `1` means refused: print its `reason` and stop.
 
-- Extract `<JIRA-KEY>` (required) and flags
-- `--from` and `--until` must be in `01`–`07` and `from ≤ until`; otherwise stop with a clear error
+### 1. Status, Resume or Reset an Existing Pipeline
+
+Handle these flags first; each one replaces steps 2–5:
+
+| Flag       | Run                                                    | Then                                                                                                          |
+| ---------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `--status` | `python3 -I .claude/sdlc/sdlc.py state status <JIRA-KEY>` | Print its `summary` and `table`. **Stop.**                                                                    |
+| `--resume` | `python3 -I .claude/sdlc/sdlc.py state resume <JIRA-KEY>` | It validates `jira_key`, finds the first stage (in `from`→`until` order) whose status is not `done` or `skipped`, sets it to `in_progress` and clears `halted`. Invoke the `next` skill it prints (step 6), or print its `message` if it says `finished`. |
+| `--reset`  | `python3 -I .claude/sdlc/sdlc.py state reset <JIRA-KEY>`  | The file is deleted; continue with step 2 to create a new pipeline.                                          |
+
+### 2. Validate Arguments (before anything is fetched)
+
+```
+python3 -I .claude/sdlc/sdlc.py state init <JIRA-KEY> [--from NN] [--until NN] [--no-worktree] --check
+```
+
+- The script checks that `<JIRA-KEY>` looks like a Jira key, that `--from` and `--until` are in `01`–`07` with `from ≤ until`, and that no state file exists yet. It writes nothing.
+- If a state file already exists, it exits `1`. **Refuse.** Print the current stage and status and the `--resume`, `--reset` and `--status` options it lists. Do not run anything.
 - Worktree mode is the **default**: `/02-start-task` is invoked with `--worktree` unless `--no-worktree` was given. The worktree is created under `.worktrees/<JIRA-KEY>` and removed by `/07-complete-task`.
-- If `--until 07`: print this warning, then continue (the user asked for it on the command line):
+- If `--until 07`, the output's `warning` is this. Print it, then continue (the user asked for it on the command line):
 
   ```
   ⚠️  --until 07 will MERGE the pull request(s) and transition the Jira ticket to "Done" without pausing.
   ```
-
-### 2. Handle an Existing State File
-
-Look for `.sdlc/<JIRA-KEY>.json` in the **current working directory** (the pipeline root).
-
-| State file exists? | Flag       | Action                                                                                               |
-| ------------------ | ---------- | ---------------------------------------------------------------------------------------------------- |
-| No                 | any        | Create a new pipeline (step 3 onward)                                                                |
-| Yes                | `--status` | Read the file with the `Read` tool and print its contents plus a one-line summary (current stage, halted reason if any). **Stop.** |
-| Yes                | `--resume` | Validate `jira_key` matches. Find the first stage (in `from`→`until` order) whose status is not `done` or `skipped`. Set it to `in_progress`, clear `halted`, and invoke it (step 6). |
-| Yes                | `--reset`  | Delete the file with exactly `rm .sdlc/<JIRA-KEY>.json` from the pipeline root (that relative form is pre-approved), then create a new pipeline (step 3 onward) |
-| Yes                | none       | **Refuse.** Print the current stage and status and the three options above. Do not run anything.    |
 
 ### 3. Preflight (fail fast, before anything is posted to Jira)
 
 1. **Jira reachable, and which server**: fetch the ticket with `mcp__Atlassian__getJiraIssue` first. If that server is missing or returns 404, retry once with the claude.ai connector (`mcp__claude_ai_Atlassian_MCP__getJiraIssue`, after `getAccessibleAtlassianResources` for the `cloudId`). Record the server that worked as `jira.server_prefix` (`mcp__Atlassian__` or `mcp__claude_ai_Atlassian_MCP__`) and its `jira.cloud_id`. Stop if neither finds the ticket.
 2. **GitHub MCP available** (only if `until ≥ 05`): confirm the GitHub MCP Server tools are loaded. `/05-create-pr` refuses to fall back to the `gh` CLI, so stop now rather than after implementation. Do not check whether the `gh` CLI is installed; no stage uses it.
 3. **Clean working tree** (only if `from ≤ 02`): discover repos with the `Glob` tool if it is listed, otherwise `ls -d */.git` (`*/.git` plus the current directory, same discovery as `/02-start-task`), then run `git -C <absolute-repo-path> status --short` once per repo, each in its own Bash call (no `cd`, no loops). Stop if any repo has uncommitted changes.
-4. **Environment facts** (record once, so later stages never rediscover them):
-   - `pr_template`: the path of `.github/pull_request_template.md` (or `PULL_REQUEST_TEMPLATE.md`) if one exists in a discovered repo, else `null`.
+4. **Environment facts** (recorded once by step 4, so later stages never rediscover them):
+   - `pr_template`: the path of `.github/pull_request_template.md` (or `PULL_REQUEST_TEMPLATE.md`) if one exists in a discovered repo, else none.
    - `jira.review_transition`: leave `null`; `/05-create-pr` fills it with the name of the "In Review" transition if the ticket offers one, or `"none"` if it does not.
    - `repos`: leave `[]`; `/01-investigate-task` fills it (or `/02-start-task` when the run starts at `02` or later).
 
 ### 4. Create the State File
 
-Write `.sdlc/<JIRA-KEY>.json` in the current working directory with the `Write` tool (it creates `.sdlc/` as needed; no `mkdir`, no shell redirect):
+Run this from the pipeline root with the facts from preflight. Never write the file with the `Write` tool or a shell redirect:
+
+```
+python3 -I .claude/sdlc/sdlc.py state init <JIRA-KEY> [--from NN] [--until NN] [--no-worktree] --jira-server <server_prefix> --cloud-id <cloud_id> [--pr-template <path>]
+```
+
+It writes `.sdlc/<JIRA-KEY>.json` (creating `.sdlc/` as needed), sets stage `from` to `in_progress`, and prints `next`, the Skill tool call for the first stage. The file looks like this:
 
 ```json
 {
@@ -161,7 +172,8 @@ Field rules:
 - `halted` is `null` or `{ "stage": "04", "reason": "…", "at": "…" }`. `/06-pr-review` may add `"advisory_diff": { "<repo>": { "new": [...], "fixed": [...], "unchanged": [...] } }` when it halts on a pre-existing audit failure; `/07-complete-task` reads it
 - `tools`, `jira`, `pr_template` and `repos` are written once (preflight and `/01-investigate-task`). Stages `02`–`07` **read them from this file** instead of rediscovering them: use `jira.server_prefix` for every Atlassian call and pass `jira.cloud_id`; use `repos[].path` instead of scanning for `.git`; use `repos[].yarn` to pick the command shape. Each `repos` entry is `{ "name": "api", "path": "/abs/path", "yarn": "classic" | "berry" | null }`. In standalone mode (no state file) a stage falls back to its own discovery
 - `notes` collects non-blocking observations from stages (e.g. `/04-reconcile-work` "ready with conditions")
-- Timestamps are ISO 8601 UTC, taken from `date -u +%Y-%m-%dT%H:%M:%SZ`
+- Timestamps are ISO 8601 UTC, written by the script
+- The script owns `stages`, `current_stage`, `halted`, `completed_at` and `notes`. Skills only ever edit `repos`, `jira` and `pr_template`, with the `Edit` tool
 
 ### 5. Why a State File
 
@@ -176,7 +188,7 @@ The state file replaces inference with a fact on disk:
 
 ### 6. Invoke the First Stage
 
-Set `stages[from].status = "in_progress"` and `current_stage = from`, then invoke the stage via the Skill tool:
+`state init` (or `state resume`) has already set the stage to `in_progress` and made it `current_stage`. Invoke exactly the `next` skill and args it printed via the Skill tool. For reference, the calls are:
 
 | Stage | Skill tool call                                                              |
 | ----- | ---------------------------------------------------------------------------- |
@@ -192,14 +204,14 @@ From here on, each stage's own **"⛔ Stop or Hand Off"** section advances the s
 
 ### 7. Pipeline Announcements
 
-These are run by whichever stage finishes or halts the chain (the stage skills reference this section).
+`state advance` and `state halt` run these for whichever stage finishes or halts the chain. The agent only prints the `message` they return. This section documents what they do.
 
 **Finished** (the stage that equals `until` completed successfully):
 
-1. Set `current_stage = null` and `completed_at` in the state file
-2. Run `say finished the SDLC pipeline for {SOC-XX}` (replace `{SOC-XX}` with the actual key)
-3. Print a summary table of every stage and its status
-4. Print the next manual step. When `until` is `06`:
+1. Sets `current_stage = null` and `completed_at` in the state file
+2. Runs `say finished the SDLC pipeline for {SOC-XX}` (replace `{SOC-XX}` with the actual key)
+3. Returns a summary table of every stage and its status
+4. Returns the next manual step. When `until` is `06`:
 
    ```
    Pipeline finished before merge. When you are ready:
@@ -208,20 +220,20 @@ These are run by whichever stage finishes or halts the chain (the stage skills r
 
    When `until` is `07`: `Pipeline finished. PR merged and SOC-XX is Done.`
 
-5. Leave the state file in place (it documents the run). It is removed by `--reset` or by hand.
+5. Leaves the state file in place (it documents the run). It is removed by `--reset`.
 
 **Halted** (a stage failed its gate):
 
-1. Set `stages[NN].status = "failed"` and `halted = { "stage": "NN", "reason": "<one line>", "at": "<timestamp>" }`
-2. Run `say the SDLC pipeline halted at stage {NN} for {SOC-XX}`
-3. Print the stage, the reason, and:
+1. Sets `stages[NN].status = "failed"` and `halted = { "stage": "NN", "reason": "<one line>", "at": "<timestamp>" }`
+2. Runs `say the SDLC pipeline halted at stage {NN} for {SOC-XX}`
+3. Returns the stage, the reason, and:
 
    ```
    Fix the issue, then continue with:
      /00-run-sdlc SOC-XX --resume
    ```
 
-4. Stop. Do not invoke any further stage.
+4. The stage then stops and invokes no further stage.
 
 ## Halt Gates per Stage
 
@@ -241,12 +253,13 @@ A stage halts the chain (instead of handing off) when:
 
 Pipelines are long and the conversation may be compacted mid-run. Rules for every stage:
 
-- After any compaction, **re-read `.sdlc/<JIRA-KEY>.json` before acting**
+- After any compaction, **re-read `.sdlc/<JIRA-KEY>.json` before acting** (`state locate` or `state status` does this)
 - If the file says the current stage is `in_progress`, re-verify that stage's own outputs (Jira comment posted, branch exists, PR exists, etc.) before marking it `done`
 - Never continue because a summary says a step was "pending"; only the file decides
 
 ## Prerequisites
 
+- `.claude/sdlc/sdlc.py` linked into the project (`install.py` does this) and allow-listed as `Bash(python3 -I .claude/sdlc/sdlc.py *)`
 - Jira MCP server configured in `.mcp.json`
 - GitHub MCP server configured in `.mcp.json` (required when `--until` is `05` or higher)
 - Git repository initialized with a remote

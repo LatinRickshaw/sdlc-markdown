@@ -3,7 +3,9 @@
   "retired": [
     "Bash(gh run list*)",
     "Bash(gh run view *)",
-    "Bash(gh run watch *)"
+    "Bash(gh run watch *)",
+    "Bash(rm .sdlc/*)",
+    "Bash(rm -f .sdlc/*)"
   ],
   "permissions": {
     "defaultMode": "acceptEdits",
@@ -84,8 +86,7 @@
       "Bash(git -C * cherry-pick *)",
       "Bash(git -C * merge *)",
       "Bash(git -C * rm *)",
-      "Bash(rm .sdlc/*)",
-      "Bash(rm -f .sdlc/*)",
+      "Bash(python3 -I .claude/sdlc/sdlc.py *)",
 
       "mcp__Atlassian__get*",
       "mcp__Atlassian__search*",
