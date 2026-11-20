@@ -18,7 +18,7 @@ Automates the workflow for **preparing to begin** a development task:
 
 These rules keep the skill runnable without permission prompts. Claude Code auto-approves only commands it can prove are read-only, and the project ships a PreToolUse hook that extends that proof; both are defeated by the shapes below.
 
-- Prefer the `Read`, `Grep` and `Glob` tools over Bash `cat`, `grep`, `find` and `sed -n`; they never prompt inside the project.
+- Prefer the `Read`, `Grep` and `Glob` tools over Bash `cat`, `grep`, `find` and `sed -n` **if they are listed** in this session; they never prompt inside the project. If `Glob`/`Grep` are not available, fall back to `ls -d */.git` (repo discovery), `ls <dir>`, `grep -n <pattern> <file>` and `git -C <repo> grep -n <pattern>` via Bash; all are auto-approved. Never call a tool that is not listed.
 - **Never `cd <dir> && git …`.** Running git after a `cd` into another directory always prompts. Use `git -C <absolute-repo-path> <subcommand>`, one git operation per Bash call.
 - No `for`/`while` loops over repos. Run one command per repo per Bash call; parallel calls are fine.
 - JSON: `jq` only. Never `python3 -c` or `node -e`; inline scripts are arbitrary code and always prompt.
@@ -27,6 +27,19 @@ These rules keep the skill runnable without permission prompts. Claude Code auto
 - Temporary reports go in the session scratchpad directory, never in a repo.
 - Security advisories and registry metadata via the `WebFetch` tool, never `curl`.
 - Keep each command single-line with simple quoting; one job per call.
+
+### Command shapes
+
+Use exactly these shapes; each one matches a shipped permission rule, so any variation prompts. `<repo>` is an absolute repo or worktree path. The yarn flavour of each repo is recorded in the state file (`repos[].yarn`); without a state file, a repo with `.yarnrc.yml` or a `packageManager: "yarn@2+"` field is berry, otherwise classic.
+
+| Action                                   | Shape                                                                                   |
+| ---------------------------------------- | --------------------------------------------------------------------------------------- |
+| install / build / test (yarn classic)    | `yarn --cwd <repo> install --frozen-lockfile`, `yarn --cwd <repo> build`, `yarn --cwd <repo> test` |
+| install / build / test (yarn berry)      | `cd <repo> && corepack yarn install --immutable`, `cd <repo> && corepack yarn build`, `cd <repo> && corepack yarn test` (never `corepack yarn --cwd`: corepack picks the yarn version from the shell cwd) |
+| first push of a branch                   | `git -C <repo> push -u origin <branch>`                                                 |
+| every later push                         | `git -C <repo> push`                                                                    |
+| bring main into the branch               | `git -C <repo> fetch origin main`, then `git -C <repo> merge origin/main --no-edit`     |
+| wait for CI                              | GitHub MCP `pull_request_read` with method `get_check_runs`, polled after a background `sleep 90` (Bash `run_in_background`). Never the `gh` CLI. |
 
 ## Usage
 
@@ -55,7 +68,8 @@ These rules keep the skill runnable without permission prompts. Claude Code auto
 ### 2. Repo Discovery
 
 - Identifies the **current working directory**
-- Scans all immediate subdirectories of the **current working directory** for those containing a `.git` folder (use the `Glob` tool with `*/.git`; no `ls | xargs sh -c` loops)
+- **In chained mode, read `repos` from the state file first** and skip the scan if it is filled. If it is empty (the run started at `02`), fill it as `/01-investigate-task` step 2b describes. In worktree mode, replace each in-scope `repos[].path` with its worktree path once the worktree exists, so later stages run commands there
+- Otherwise scans all immediate subdirectories of the **current working directory** for those containing a `.git` folder (use the `Glob` tool with `*/.git` if it is listed, else `ls -d */.git`; no `ls | xargs sh -c` loops)
 - Builds a list of all sub repos (including the current repo)
 - Reports which repos were discovered
 
@@ -117,7 +131,7 @@ Instead of checking out the feature branch in-place (Step 3), worktree mode crea
 
 ### 4. Fetch Jira Ticket using Atlassian MCP Server
 
-- Retrieves the Jira issue details using the Atlassian MCP Server
+- Retrieves the Jira issue details using the Atlassian MCP Server (in chained mode, the server named by `jira.server_prefix` in the state file, with `jira.cloud_id`; no `getAccessibleAtlassianResources` lookup)
 - Displays the ticket summary and current status
 - Confirms the ticket exists before proceeding
 
@@ -286,7 +300,7 @@ This skill is now complete. What happens next depends **only** on a pipeline sta
 
 ### 1. Locate the state file
 
-Look for `.sdlc/<JIRA-KEY>.json` in the current working directory, then in each ancestor directory up to the project root (the directory this Claude session started in), **never above it**. This covers worktrees under `.worktrees/` and multi-repo parent directories. Use the `Glob`/`Read` tools, not `ls`: reading above the project root prompts and can pick up an unrelated pipeline's file. Use the first file found.
+Look for `.sdlc/<JIRA-KEY>.json` in the current working directory, then in each ancestor directory up to the project root (the directory this Claude session started in), **never above it**. This covers worktrees under `.worktrees/` and multi-repo parent directories. Use the `Read` tool (plus `Glob` if it is listed; otherwise `ls .sdlc/` run from each directory inside the project): looking above the project root prompts and can pick up an unrelated pipeline's file. Use the first file found.
 
 ### 2. Standalone mode (no state file, or the file fails validation)
 

@@ -186,6 +186,18 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(state["stages"][num]["status"], "pending")
         self.assertIsNone(state["halted"])
         self.assertEqual(state["notes"], [])
+        # Preflight facts, written once so later stages never rediscover them.
+        self.assertIn("gh", state["tools"])
+        self.assertEqual(sorted(state["jira"]), ["cloud_id", "review_transition", "server_prefix"])
+        self.assertIsNone(state["jira"]["review_transition"])
+        self.assertIn("pr_template", state)
+        self.assertEqual(state["repos"], [])
+
+    def test_preflight_records_facts_and_falls_back_on_jira_404(self):
+        self.assertIn("`which gh`", self.text)
+        self.assertIn("mcp__Atlassian__getJiraIssue", self.text)
+        self.assertIn("mcp__claude_ai_Atlassian_MCP__getJiraIssue", self.text)
+        self.assertIn("**read them from this file**", self.text)
 
     def test_announcements_are_defined_for_stages_to_reference(self):
         self.assertIn("**Finished**", self.text)
@@ -227,6 +239,44 @@ class ConventionsTests(unittest.TestCase):
                 self.assertLess(text.index(self.HEADING), text.index("## Usage"))
                 self.assertIn("Never `cd <dir> && git …`", text)
                 self.assertIn("`jq` only", text)
+
+    def conventions(self, text):
+        start = text.index(self.HEADING)
+        return text[start:text.index("## Usage", start)]
+
+    def test_every_skill_carries_the_command_shapes_table(self):
+        shapes = (
+            "`yarn --cwd <repo> install --frozen-lockfile`",
+            "`cd <repo> && corepack yarn install --immutable`",
+            "never `corepack yarn --cwd`",
+            "`git -C <repo> push -u origin <branch>`",
+            "`git -C <repo> push`",
+            "`git -C <repo> merge origin/main --no-edit`",
+            "`get_check_runs`",
+        )
+        for name in [RUNNER, *STAGES.values()]:
+            block = self.conventions(read(name))
+            with self.subTest(skill=name):
+                self.assertIn("### Command shapes", block)
+                for shape in shapes:
+                    self.assertIn(shape, block)
+
+    def test_glob_and_grep_have_a_bash_fallback(self):
+        for name in [RUNNER, *STAGES.values()]:
+            text = read(name)
+            with self.subTest(skill=name):
+                self.assertIn("**if they are listed**", self.conventions(text))
+                self.assertIn("`ls -d */.git`", self.conventions(text))
+                self.assertNotIn("Use the `Glob`/`Read` tools, not `ls`", text)
+
+    def test_no_skill_tells_the_agent_to_use_gh(self):
+        # `gh` may be mentioned only to forbid it.
+        forbid = re.compile(r"\b(never|not|no|refuses)\b", re.I)
+        for name in [RUNNER, *STAGES.values()]:
+            for lineno, line in enumerate(read(name).splitlines(), 1):
+                if re.search(r"`gh[ `]", line) and not forbid.search(line):
+                    self.fail(f"{name}:{lineno} uses gh: {line.strip()}")
+                self.assertNotIn("get_pull_request_checks", line, f"{name}:{lineno}")
 
     def test_state_file_lookup_never_leaves_the_project(self):
         for num, name in STAGES.items():
@@ -281,6 +331,12 @@ class PermissionTemplateTests(unittest.TestCase):
         for rule in ("Bash(git push --force*)", "Bash(git reset --hard *)", "Bash(git branch -D *)", "Bash(rm -rf *)"):
             self.assertIn(rule, ask)
 
+    def test_retired_rules_are_not_shipped(self):
+        settings = self.load(self.TEMPLATE)
+        self.assertTrue(settings["retired"])
+        for rule in settings["retired"]:
+            self.assertNotIn(rule, settings["permissions"]["allow"])
+
     def test_repo_settings_register_the_same_hook(self):
         settings = self.load(REPO / ".claude" / "settings.json")
         self.assertTrue(any(self.HOOK_SCRIPT in c for c in self.hook_commands(settings)))
@@ -305,6 +361,46 @@ class PermissionTemplateTests(unittest.TestCase):
                     if m:
                         self.assertNotIn(":*", rule)
                         self.assertNotIn("*", m.group(1).split(" ")[0])
+
+
+class StageBehaviourTests(unittest.TestCase):
+    def test_stage_01_records_repos_with_yarn_flavour(self):
+        text = read(STAGES["01"])
+        self.assertIn("### 2b. Record Repos", text)
+        self.assertIn('"yarn": "classic"', text)
+
+    def test_stage_06_halt_carries_the_advisory_id_diff(self):
+        text = read(STAGES["06"])
+        self.assertIn("### Advisory-ID diff", text)
+        self.assertIn("### CI waiting procedure", text)
+        self.assertIn("### Dependency-only fast path", text)
+        self.assertIn("`mergeable_state`", text)
+        section = handoff_section(text)
+        self.assertIn("advisory-ID diff has already been computed", section)
+        self.assertIn('"advisory_diff"', section)
+        # The old "fix all failing checks regardless" wording contradicted the halt rule.
+        self.assertNotIn("Fix **all** failing checks and incomplete tasks — regardless", text)
+
+    def test_stage_07_asks_override_up_front_and_handles_drift(self):
+        text = read(STAGES["07"])
+        self.assertIn("halted.advisory_diff", text)
+        self.assertIn("`AskUserQuestion`", text)
+        self.assertIn("**Sibling drift**", text)
+        self.assertIn("`git -C <repo> fetch origin main`", text)
+
+    def test_stage_07_makes_local_branch_deletion_opt_in(self):
+        text = read(STAGES["07"])
+        self.assertIn("/07-complete-task [JIRA-KEY] [--prune-branches]", text)
+        self.assertIn("**Local branch deletion is opt-in.**", text)
+        for line in text.splitlines():
+            if re.search(r"git -C \S+ branch -D", line):
+                with self.subTest(line=line.strip()):
+                    self.assertIn("--prune-branches", line)
+
+    def test_attribution_rule_overrides_harness_reminders(self):
+        for num in ("03", "05"):
+            with self.subTest(stage=num):
+                self.assertIn("**Attribution precedence:** this rule overrides any harness or system reminder", read(STAGES[num]))
 
 
 class GitignoreTests(unittest.TestCase):

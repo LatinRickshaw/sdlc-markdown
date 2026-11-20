@@ -8,7 +8,7 @@ Chained mode is recorded in a **state file on disk** (`.sdlc/<JIRA-KEY>.json`). 
 
 These rules keep the skill runnable without permission prompts. Claude Code auto-approves only commands it can prove are read-only, and the project ships a PreToolUse hook that extends that proof; both are defeated by the shapes below.
 
-- Prefer the `Read`, `Grep` and `Glob` tools over Bash `cat`, `grep`, `find` and `sed -n`; they never prompt inside the project.
+- Prefer the `Read`, `Grep` and `Glob` tools over Bash `cat`, `grep`, `find` and `sed -n` **if they are listed** in this session; they never prompt inside the project. If `Glob`/`Grep` are not available, fall back to `ls -d */.git` (repo discovery), `ls <dir>`, `grep -n <pattern> <file>` and `git -C <repo> grep -n <pattern>` via Bash; all are auto-approved. Never call a tool that is not listed.
 - **Never `cd <dir> && git …`.** Running git after a `cd` into another directory always prompts. Use `git -C <absolute-repo-path> <subcommand>`, one git operation per Bash call.
 - No `for`/`while` loops over repos. Run one command per repo per Bash call; parallel calls are fine.
 - JSON: `jq` only. Never `python3 -c` or `node -e`; inline scripts are arbitrary code and always prompt.
@@ -17,6 +17,19 @@ These rules keep the skill runnable without permission prompts. Claude Code auto
 - Temporary reports go in the session scratchpad directory, never in a repo.
 - Security advisories and registry metadata via the `WebFetch` tool, never `curl`.
 - Keep each command single-line with simple quoting; one job per call.
+
+### Command shapes
+
+Use exactly these shapes; each one matches a shipped permission rule, so any variation prompts. `<repo>` is an absolute repo or worktree path. The yarn flavour of each repo is recorded in the state file (`repos[].yarn`); without a state file, a repo with `.yarnrc.yml` or a `packageManager: "yarn@2+"` field is berry, otherwise classic.
+
+| Action                                   | Shape                                                                                   |
+| ---------------------------------------- | --------------------------------------------------------------------------------------- |
+| install / build / test (yarn classic)    | `yarn --cwd <repo> install --frozen-lockfile`, `yarn --cwd <repo> build`, `yarn --cwd <repo> test` |
+| install / build / test (yarn berry)      | `cd <repo> && corepack yarn install --immutable`, `cd <repo> && corepack yarn build`, `cd <repo> && corepack yarn test` (never `corepack yarn --cwd`: corepack picks the yarn version from the shell cwd) |
+| first push of a branch                   | `git -C <repo> push -u origin <branch>`                                                 |
+| every later push                         | `git -C <repo> push`                                                                    |
+| bring main into the branch               | `git -C <repo> fetch origin main`, then `git -C <repo> merge origin/main --no-edit`     |
+| wait for CI                              | GitHub MCP `pull_request_read` with method `get_check_runs`, polled after a background `sleep 90` (Bash `run_in_background`). Never the `gh` CLI. |
 
 ## Usage
 
@@ -100,9 +113,14 @@ Look for `.sdlc/<JIRA-KEY>.json` in the **current working directory** (the pipel
 
 ### 3. Preflight (fail fast, before anything is posted to Jira)
 
-1. **Jira reachable**: fetch the ticket via the Atlassian MCP Server. Stop if the ticket does not exist or the server is unavailable.
+1. **Jira reachable, and which server**: fetch the ticket with `mcp__Atlassian__getJiraIssue` first. If that server is missing or returns 404, retry once with the claude.ai connector (`mcp__claude_ai_Atlassian_MCP__getJiraIssue`, after `getAccessibleAtlassianResources` for the `cloudId`). Record the server that worked as `jira.server_prefix` (`mcp__Atlassian__` or `mcp__claude_ai_Atlassian_MCP__`) and its `jira.cloud_id`. Stop if neither finds the ticket.
 2. **GitHub MCP available** (only if `until ≥ 05`): confirm the GitHub MCP Server tools are loaded. `/05-create-pr` refuses to fall back to the `gh` CLI, so stop now rather than after implementation.
-3. **Clean working tree** (only if `from ≤ 02`): discover repos with the `Glob` tool (`*/.git` plus the current directory, same discovery as `/02-start-task`), then run `git -C <absolute-repo-path> status --short` once per repo, each in its own Bash call (no `cd`, no loops). Stop if any repo has uncommitted changes.
+3. **Clean working tree** (only if `from ≤ 02`): discover repos with the `Glob` tool if it is listed, otherwise `ls -d */.git` (`*/.git` plus the current directory, same discovery as `/02-start-task`), then run `git -C <absolute-repo-path> status --short` once per repo, each in its own Bash call (no `cd`, no loops). Stop if any repo has uncommitted changes.
+4. **Environment facts** (record once, so later stages never rediscover them):
+   - `tools.gh`: `true` if `which gh` prints a path, else `false`. Informational only: no stage uses `gh` either way; CI is read through the GitHub MCP.
+   - `pr_template`: the path of `.github/pull_request_template.md` (or `PULL_REQUEST_TEMPLATE.md`) if one exists in a discovered repo, else `null`.
+   - `jira.review_transition`: leave `null`; `/05-create-pr` fills it with the name of the "In Review" transition if the ticket offers one, or `"none"` if it does not.
+   - `repos`: leave `[]`; `/01-investigate-task` fills it (or `/02-start-task` when the run starts at `02` or later).
 
 ### 4. Create the State File
 
@@ -117,6 +135,10 @@ Write `.sdlc/<JIRA-KEY>.json` in the current working directory with the `Write` 
   "worktree": true,
   "pipeline_root": "/absolute/path/to/cwd",
   "started_at": "2026-11-16T10:00:00Z",
+  "tools": { "gh": false },
+  "jira": { "server_prefix": "mcp__Atlassian__", "cloud_id": "00000000-0000-0000-0000-000000000000", "review_transition": null },
+  "pr_template": null,
+  "repos": [],
   "current_stage": "01",
   "stages": {
     "01": { "status": "in_progress", "started_at": "2026-11-16T10:00:00Z" },
@@ -137,7 +159,8 @@ Field rules:
 
 - Stage `status` is one of `pending | in_progress | done | failed | skipped`
 - Stages outside `from`–`until` are `skipped`
-- `halted` is `null` or `{ "stage": "04", "reason": "…", "at": "…" }`
+- `halted` is `null` or `{ "stage": "04", "reason": "…", "at": "…" }`. `/06-pr-review` may add `"advisory_diff": { "<repo>": { "new": [...], "fixed": [...], "unchanged": [...] } }` when it halts on a pre-existing audit failure; `/07-complete-task` reads it
+- `tools`, `jira`, `pr_template` and `repos` are written once (preflight and `/01-investigate-task`). Stages `02`–`07` **read them from this file** instead of rediscovering them: use `jira.server_prefix` for every Atlassian call and pass `jira.cloud_id`; use `repos[].path` instead of scanning for `.git`; use `repos[].yarn` to pick the command shape. Each `repos` entry is `{ "name": "api", "path": "/abs/path", "yarn": "classic" | "berry" | null }`. In standalone mode (no state file) a stage falls back to its own discovery
 - `notes` collects non-blocking observations from stages (e.g. `/04-reconcile-work` "ready with conditions")
 - Timestamps are ISO 8601 UTC, taken from `date -u +%Y-%m-%dT%H:%M:%SZ`
 

@@ -8,7 +8,7 @@ This skill conducts comprehensive code review of a pull request, implements reco
 
 These rules keep the skill runnable without permission prompts. Claude Code auto-approves only commands it can prove are read-only, and the project ships a PreToolUse hook that extends that proof; both are defeated by the shapes below.
 
-- Prefer the `Read`, `Grep` and `Glob` tools over Bash `cat`, `grep`, `find` and `sed -n`; they never prompt inside the project.
+- Prefer the `Read`, `Grep` and `Glob` tools over Bash `cat`, `grep`, `find` and `sed -n` **if they are listed** in this session; they never prompt inside the project. If `Glob`/`Grep` are not available, fall back to `ls -d */.git` (repo discovery), `ls <dir>`, `grep -n <pattern> <file>` and `git -C <repo> grep -n <pattern>` via Bash; all are auto-approved. Never call a tool that is not listed.
 - **Never `cd <dir> && git …`.** Running git after a `cd` into another directory always prompts. Use `git -C <absolute-repo-path> <subcommand>`, one git operation per Bash call.
 - No `for`/`while` loops over repos. Run one command per repo per Bash call; parallel calls are fine.
 - JSON: `jq` only. Never `python3 -c` or `node -e`; inline scripts are arbitrary code and always prompt.
@@ -17,6 +17,19 @@ These rules keep the skill runnable without permission prompts. Claude Code auto
 - Temporary reports go in the session scratchpad directory, never in a repo.
 - Security advisories and registry metadata via the `WebFetch` tool, never `curl`.
 - Keep each command single-line with simple quoting; one job per call.
+
+### Command shapes
+
+Use exactly these shapes; each one matches a shipped permission rule, so any variation prompts. `<repo>` is an absolute repo or worktree path. The yarn flavour of each repo is recorded in the state file (`repos[].yarn`); without a state file, a repo with `.yarnrc.yml` or a `packageManager: "yarn@2+"` field is berry, otherwise classic.
+
+| Action                                   | Shape                                                                                   |
+| ---------------------------------------- | --------------------------------------------------------------------------------------- |
+| install / build / test (yarn classic)    | `yarn --cwd <repo> install --frozen-lockfile`, `yarn --cwd <repo> build`, `yarn --cwd <repo> test` |
+| install / build / test (yarn berry)      | `cd <repo> && corepack yarn install --immutable`, `cd <repo> && corepack yarn build`, `cd <repo> && corepack yarn test` (never `corepack yarn --cwd`: corepack picks the yarn version from the shell cwd) |
+| first push of a branch                   | `git -C <repo> push -u origin <branch>`                                                 |
+| every later push                         | `git -C <repo> push`                                                                    |
+| bring main into the branch               | `git -C <repo> fetch origin main`, then `git -C <repo> merge origin/main --no-edit`     |
+| wait for CI                              | GitHub MCP `pull_request_read` with method `get_check_runs`, polled after a background `sleep 90` (Bash `run_in_background`). Never the `gh` CLI. |
 
 ## Usage
 
@@ -50,6 +63,8 @@ Analyzes all touched files comprehensively — not just lines introduced by this
 
 > **Important**: Do not limit the review to diff lines. If a pre-existing bug, missing test, or quality gap is found anywhere in a touched file, it must be flagged and fixed. The fact that this PR did not introduce the issue is irrelevant — shipping high-quality code is the standard.
 
+> **Exception — dependency-only PRs:** if the diff touches only `package.json` and the lockfile (`yarn.lock`, `package-lock.json`), use the **Dependency-only fast path** below instead of the full-file review. Do not "fix" pre-existing issues in those files: editing unrelated `resolutions` or version ranges re-resolves other packages and widens the change.
+
 Generates detailed review with categorized recommendations.
 
 ### Phase 3: Implement Recommendations
@@ -70,15 +85,18 @@ Generates detailed review with categorized recommendations.
 
 After pushing, verify all checks and tasks pass before proceeding to approval:
 
-> **Important**: Fix **all** failing checks and incomplete tasks — regardless of whether this PR caused them. A pre-existing failing check or unchecked task is still a blocker. The bar is a green, shippable PR, not attribution of who broke what.
+> **Important**: Every failing check is a blocker, whether or not this PR caused it. Fix any failing check whose cause is in code or config (tests, lint, types, build), including pre-existing ones. The one exception is a **pre-existing audit failure**, described below. It is documented and halts the run, and this stage does not try to fix it.
 
-1. Fetch all PR checks/status using GitHub MCP
+1. Fetch all PR checks with the **CI waiting procedure** (below)
 2. Fetch all PR tasks/to-do items (checklist items in PR description) using GitHub MCP
 3. For each **failed or errored check** (whether introduced by this PR or pre-existing):
    - Identify the root cause by reading the check's log output
-   - Fix the underlying issue (e.g. failing tests, lint errors, type errors, build failures)
-   - Commit and push the fix
-   - Wait for the check to re-run and confirm it passes
+   - **Audit-type check** (Security Scans, `yarn audit`, `npm audit`, dependency review): compute the **Advisory-ID diff** (below) first.
+     - If the diff shows `new` advisories, this PR caused them. Fix them like any other failure.
+     - If `new` is empty, the failure is **pre-existing**: the same advisories are red on `main`. Do not fix it here, because that widens the PR beyond its ticket. Post the diff in the PR summary comment and halt (see "Decide the outcome"). `/07-complete-task` asks the user whether to override.
+   - Any other check: fix the underlying issue (e.g. failing tests, lint errors, type errors, build failures)
+   - Commit and push the fix (`git -C <repo> push`)
+   - Wait for the check to re-run with the CI waiting procedure and confirm it passes
 4. For each **incomplete PR task** (unchecked checklist item in the PR body, regardless of origin):
    - Determine whether it can be completed programmatically (e.g. "add tests", "update docs")
    - If so, complete the work, commit, and push
@@ -88,7 +106,7 @@ After pushing, verify all checks and tasks pass before proceeding to approval:
 
 > **Important**: Do not proceed to Phase 4 (Approval) until all required checks pass and all automatable PR tasks are complete — including any that existed before this PR was opened.
 
-> **HARD GATE before Phase 4:** If any required check is still failing — for any reason, including pre-existing failures — do NOT post a ✅ ready-for-merge comment and do NOT mark the PR as ready. Repeat the process until all PR checks are green. Only proceed to Phase 4 when all checks are green.
+> **HARD GATE before Phase 4:** If any check is still failing for any reason, do NOT post a ✅ ready-for-merge comment and do NOT mark the PR as ready. That includes a documented pre-existing audit failure. Repeat the process until all PR checks are green; only proceed to Phase 4 when all checks are green. For a pre-existing audit failure, post the summary comment with the advisory-ID diff and a ⛔ "blocked: pre-existing audit failure" status instead, then halt.
 
 ### Phase 4: Approval & Finalization
 
@@ -157,13 +175,49 @@ Example implementation order:
 
 After pushing recommendation commits:
 
-- Fetch all check runs for the PR's head SHA using `get_pull_request_checks` or `list_check_runs_for_ref` via GitHub MCP
-- Fetch PR details including the task checklist using `get_pull_request` via GitHub MCP
-- For each failing check (whether caused by this PR or pre-existing): read the log, diagnose, fix, push, and wait for re-run
+- Fetch all check runs for the PR's head SHA with the **CI waiting procedure** below (GitHub MCP `pull_request_read`, method `get_check_runs`)
+- Fetch PR details including the task checklist using `pull_request_read` (method `get`) via GitHub MCP
+- For each failing check: read the log, diagnose, fix, push, and wait for the re-run. The exception is a pre-existing audit failure: compute the advisory-ID diff, document it, and halt (Phase 3b)
 - For each PR task (checklist item in description, regardless of origin): complete automatable ones; flag manual ones
-- Repeat until all checks are passing (verified via `get_pull_request_checks` via GitHub MCP)
-- Do NOT advance to Step 5 if any required check is still failing — the cause of the failure is irrelevant
+- Repeat until all checks are passing (verified with `get_check_runs`)
+- Do NOT advance to Step 5 if any check is still failing. The cause of the failure is irrelevant
 - Repeat the process of fixing issues and verifying checks until a green PR is achieved
+
+### CI waiting procedure
+
+CI is read through the GitHub MCP only. Never use the `gh` CLI, even if it is installed.
+
+1. Call `pull_request_read` with method `get_check_runs` for the PR.
+2. If any run is `queued` or `in_progress`, start `sleep 90` as a **background** Bash call (`run_in_background`). Poll again when it finishes. Lint/Test typically take 45–75 s, E2E about 80 s, and Security Scans about 30 s. Give up after about 20 minutes and report the check as stuck.
+3. If the list of check runs is **empty**, fetch the PR (`pull_request_read`, method `get`) and look at `mergeable_state`:
+   - `dirty`: the PR conflicts with its base, and GitHub runs no CI on a conflicted PR. Bring main in with `git -C <repo> fetch origin main` and `git -C <repo> merge origin/main --no-edit`, resolve the conflicts, then install, build and test using the command shapes, `git -C <repo> push`, and restart this procedure.
+   - `unknown`: GitHub is still computing mergeability. Re-fetch the PR after the next background sleep.
+   - anything else, still with no runs after 3 polls: the repo has no CI for this PR. Note that in the summary comment.
+4. Done when every run has `status: completed`. Then evaluate each `conclusion`.
+
+### Advisory-ID diff
+
+Run this for each repo with a failing audit-type check, and also as part of the Dependency-only fast path.
+
+1. **Branch side**: run the audit in the PR's checkout:
+   - yarn classic: `yarn --cwd <repo> audit --json | jq -r 'select(.type=="auditAdvisory") | .data.advisory.github_advisory_id // .data.advisory.id' | sort -u`
+   - yarn berry: `cd <repo> && corepack yarn npm audit --all --recursive --json`, then extract the advisory IDs with `jq`. If you are unsure of the output shape, inspect one line first with `| head -1`.
+2. **Main side**: run the same command in a checkout of `main`. In worktree mode that is the main working tree, which sits on `main`. Without a `main` checkout, read the advisory IDs from the log of the same check on `main`'s latest commit via the GitHub MCP, and note that in the comment.
+3. Compare the two sets:
+   - `new`: on the branch only
+   - `fixed`: on main only
+   - `unchanged`: on both
+4. Post the diff as a table in the PR summary comment. In chained mode, record it in `halted.advisory_diff` (keyed by repo name), and set `halted.reason` to a one-line summary such as `pre-existing audit failure in api: 0 new, 2 fixed, 5 unchanged advisories`.
+
+### Dependency-only fast path
+
+Use this when the PR diff touches **only** `package.json` and the lockfile (for example a bump or a `resolutions` pin for a vulnerable package). It replaces the full-file review in Phase 2. The review checks three things:
+
+1. **Lockfile scope**: `git -C <repo> diff origin/main...HEAD -- yarn.lock` changes only entries for the target package family (the package and its own transitive dependencies). Any unrelated entry that was re-resolved is a finding. Revert it, don't add to it.
+2. **One entry per target**: each target package resolves to exactly one version in the lockfile (`yarn --cwd <repo> why <pkg>` or `cd <repo> && corepack yarn why <pkg>`).
+3. **Advisory-ID diff is clean**: the advisories the ticket targets appear under `fixed`, and `new` is empty.
+
+Do not edit unrelated `resolutions`, version ranges or other "pre-existing issues" in `package.json`.
 
 ### Step 5: Finalize PR
 
@@ -472,7 +526,7 @@ This skill is now complete. What happens next depends **only** on a pipeline sta
 
 ### 1. Locate the state file
 
-Look for `.sdlc/<JIRA-KEY>.json` in the current working directory, then in each ancestor directory up to the project root (the directory this Claude session started in), **never above it**. This covers worktrees under `.worktrees/` and multi-repo parent directories. Use the `Glob`/`Read` tools, not `ls`: reading above the project root prompts and can pick up an unrelated pipeline's file. Use the first file found.
+Look for `.sdlc/<JIRA-KEY>.json` in the current working directory, then in each ancestor directory up to the project root (the directory this Claude session started in), **never above it**. This covers worktrees under `.worktrees/` and multi-repo parent directories. Use the `Read` tool (plus `Glob` if it is listed; otherwise `ls .sdlc/` run from each directory inside the project): looking above the project root prompts and can pick up an unrelated pipeline's file. Use the first file found.
 
 ### 2. Standalone mode (no state file, or the file fails validation)
 
@@ -502,7 +556,8 @@ Chained mode applies only if **all** of the following hold in the file:
 
 This stage **halts** the pipeline if any of these occurred:
 
-- Any required CI check is still failing after your fix attempts
+- Any CI check is still failing after your fix attempts
+- A check fails with a **pre-existing audit failure**. The advisory-ID diff has already been computed and posted in the PR comment (Phase 3b), so the halt costs only the override question in `/07-complete-task`. Do not try to fix it here
 - A blocker had to be documented in the PR summary comment
 - The PR is already merged
 
@@ -521,6 +576,6 @@ Update the state file with the `Edit` tool (never a shell redirect) and take tim
 
 **On halt:**
 
-1. Set `stages["06"].status = "failed"` and `halted = { "stage": "06", "reason": "<one line>", "at": "<timestamp>" }`.
+1. Set `stages["06"].status = "failed"` and `halted = { "stage": "06", "reason": "<one line>", "at": "<timestamp>" }`. For a pre-existing audit failure, also add `"advisory_diff": { "<repo>": { "new": [], "fixed": [...], "unchanged": [...] } }` so `/07-complete-task` can ask the override question without re-running the audit.
 2. Run the **Halted** announcement from `/00-run-sdlc` ("Pipeline Announcements").
 3. Stop. Do NOT invoke the next stage. The user continues with `/00-run-sdlc <JIRA-KEY> --resume` after fixing the issue.

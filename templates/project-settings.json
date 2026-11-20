@@ -1,5 +1,10 @@
 {
-  "$comment": "SDLC skills permission template. Merge into your project's .claude/settings.json; see .claude/skills/README.md -> 'Install into a project'. Rule syntax: Bash(prefix *) with the * after the subcommand. ask beats allow and beats hook approvals.",
+  "$comment": "SDLC skills permission template. Merge into your project's .claude/settings.json; see .claude/skills/README.md -> 'Install into a project'. Rule syntax: Bash(prefix *) with the * after the subcommand. ask beats allow and beats hook approvals. 'retired' lists rules earlier versions shipped; install.py removes them from allow.",
+  "retired": [
+    "Bash(gh run list*)",
+    "Bash(gh run view *)",
+    "Bash(gh run watch *)"
+  ],
   "permissions": {
     "defaultMode": "acceptEdits",
     "allow": [
@@ -39,10 +44,8 @@
       "Bash(git -C * grep *)",
       "Bash(git merge-tree *)",
       "Bash(git -C * merge-tree *)",
-      "Bash(gh run list*)",
-      "Bash(gh run view *)",
-      "Bash(gh run watch *)",
       "Bash(echo *)",
+      "Bash(sleep *)",
       "Bash(docker ps *)",
       "Bash(docker images *)",
       "Bash(docker info *)",
@@ -53,6 +56,7 @@
       "Bash(git pull *)",
       "Bash(git add *)",
       "Bash(git commit *)",
+      "Bash(git push)",
       "Bash(git push *)",
       "Bash(git branch *)",
       "Bash(git worktree *)",
@@ -69,6 +73,7 @@
       "Bash(git -C * pull *)",
       "Bash(git -C * add *)",
       "Bash(git -C * commit *)",
+      "Bash(git -C * push)",
       "Bash(git -C * push *)",
       "Bash(git -C * branch *)",
       "Bash(git -C * worktree *)",

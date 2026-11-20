@@ -141,6 +141,32 @@ class InstallTests(unittest.TestCase):
         for rule in NODE["allow"]:
             self.assertIn(rule, allow)
 
+    def test_installed_rules_match_the_skill_command_shapes(self):
+        # The skills prescribe `yarn --cwd <repo> …`, bare `git -C <repo> push`
+        # and a background `sleep 90`; each must match a rule or it prompts.
+        self.run_install("--preset", "node")
+        allow = self.settings()["permissions"]["allow"]
+        for rule in ("Bash(yarn --cwd * install)", "Bash(yarn --cwd * install *)", "Bash(yarn --cwd * test*)",
+                     "Bash(yarn --cwd * build*)", "Bash(yarn --cwd * lint*)", "Bash(yarn --cwd * tsc *)",
+                     "Bash(yarn --cwd * jest *)", "Bash(git push)", "Bash(git -C * push)", "Bash(sleep *)"):
+            self.assertIn(rule, allow)
+        self.assertFalse([r for r in allow if r.startswith("Bash(gh ")], "skills are MCP-only; no gh rules")
+        self.assertFalse([r for r in allow if r.startswith("Bash(corepack yarn --cwd")],
+                         "corepack --cwd runs the wrong yarn version")
+
+    def test_retired_rules_are_removed(self):
+        path = self.target / ".claude" / "settings.json"
+        path.parent.mkdir(parents=True)
+        seeded = ["Bash(make test)", "Bash(gh run list*)", "Bash(gh run view *)"]
+        path.write_text(json.dumps({"permissions": {"allow": seeded}}), encoding="utf-8")
+        _, out = self.run_install()
+        s = self.settings()
+        self.assertIn("Bash(make test)", s["permissions"]["allow"])
+        for rule in TEMPLATE["retired"]:
+            self.assertNotIn(rule, s["permissions"]["allow"])
+        self.assertNotIn("retired", s)
+        self.assertIn("removed 2 retired rule(s)", out)
+
     def test_allows_reading_the_sdlc_checkout(self):
         self.run_install()
         self.assertIn(f"Read(/{REPO.resolve()}/**)", self.settings()["permissions"]["allow"])

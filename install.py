@@ -13,7 +13,8 @@ template to push new rules out):
 3. Merges ``templates/project-settings.json`` (plus any ``--preset`` files from
    ``templates/presets/``) into ``<target>/.claude/settings.json``:
    - allow / ask / deny rules are added if missing; existing rules are kept
-     and never reordered or removed
+     and never reordered; only rules listed under ``retired`` in the
+     template or a preset are removed
    - ``defaultMode`` is set only if the project has none (unless
      ``--no-accept-edits``)
    - the PreToolUse Bash hook is added once
@@ -119,12 +120,15 @@ class Installer:
         # Skills and the hook are symlinks into this checkout, so reads resolve
         # outside the target project; allow reading this repo (and only it).
         wanted["allow"].append(f"Read(/{REPO.resolve()}/**)")
+        retired = list(template.get("retired", []))
         for preset in presets:
             data = self.load_json(PRESETS_DIR / f"{preset}.json")
             for name in RULE_LISTS:
                 wanted[name].extend(r for r in data.get(name, []) if r not in wanted[name])
+            retired.extend(r for r in data.get("retired", []) if r not in retired)
         return {
             "rules": wanted,
+            "retired": retired,
             "defaultMode": perms.get("defaultMode") if accept_edits else None,
             "hooks": template.get("hooks", {}).get("PreToolUse", []),
         }
@@ -153,6 +157,12 @@ class Installer:
         if overlap:
             perms["allow"] = [r for r in perms["allow"] if r not in overlap]
             notes.append(f"moved {len(overlap)} rule(s) from allow to ask")
+        # Rules the template used to ship but no longer wants (e.g. gh CLI
+        # rules once the skills went MCP-only). Only exact matches are removed.
+        retired = [r for r in perms["allow"] if r in wanted.get("retired", [])]
+        if retired:
+            perms["allow"] = [r for r in perms["allow"] if r not in retired]
+            notes.append(f"removed {len(retired)} retired rule(s)")
         if wanted["defaultMode"] and "defaultMode" not in perms:
             perms["defaultMode"] = wanted["defaultMode"]
             notes.append(f"set defaultMode to {wanted['defaultMode']}")

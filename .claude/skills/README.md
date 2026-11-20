@@ -578,6 +578,7 @@ How the merge treats an existing `settings.json`:
 
 - Missing `allow`, `ask` and `deny` rules are appended. Existing rules are kept as they are, in their original order.
 - If one of the template's `ask` rules is also in `allow`, it is removed from `allow`. Those are the force-push and delete rules, and they must always prompt.
+- Rules listed under `retired` in the template (or a preset) are removed from `allow`. These are rules an earlier version shipped that the skills no longer use, such as the `gh run …` rules from before the skills went MCP-only. Only exact matches are removed.
 - `defaultMode` is set to `acceptEdits` only when the project has no mode yet.
 - The PreToolUse Bash hook is registered once.
 - Every other key is left untouched.
